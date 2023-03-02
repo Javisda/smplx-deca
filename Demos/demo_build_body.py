@@ -95,19 +95,31 @@ def main(args):
     import pickle
     with open("D:\-DYDDV - URJC\SEDDI\smplx-deca-copia\smplx-deca\smplx_deca_main\deca\data\generic_model.pkl", "rb") as f:
         generic_deca = pickle.load(f, encoding='latin1')
-    with open("D:\-DYDDV - URJC\SEDDI\smplx-deca-copia\smplx-deca\smplx_deca_main\smplx\smpl-models\models/flame\FLAME_NEUTRAL.pkl", "rb") as f:
-        generic_smpl = pickle.load(f, encoding='latin1')
 
     deca_neutral_vertices = generic_deca['v_template']
-    smpl_neutral_vertices = generic_smpl['v_template']
 
-    # Offsets among neutral deca and neutral smpl
+    #Offsets among neutral deca and neutral smpl
+        # Smpl is posed differently as deca, so first we align them. To do so, calculate an offset with
+        # first vertex as reference (as it wont change much) -> NEED TO CHECK THIS
+    smpl_neutral_vertices_real = smpl_body_template[head_idxs].numpy().copy()
+    smpl_base_to_deca_coords_offset_x = smpl_neutral_vertices_real[0, 0] - deca_neutral_vertices[0, 0]
+    smpl_base_to_deca_coords_offset_y = smpl_neutral_vertices_real[0, 1] - deca_neutral_vertices[0, 1]
+    smpl_base_to_deca_coords_offset_z = smpl_neutral_vertices_real[0, 2] - deca_neutral_vertices[0, 2]
+        # Having the offsets, translate the smplx head to align deca
+    for a in range(5023):
+        smpl_neutral_vertices_real[a, 0] -= smpl_base_to_deca_coords_offset_x
+        smpl_neutral_vertices_real[a, 1] -= smpl_base_to_deca_coords_offset_y
+        smpl_neutral_vertices_real[a, 2] -= smpl_base_to_deca_coords_offset_z
+    shape_offset_smplbase_to_smplx = deca_neutral_vertices.copy()
+        # After being aligned, calculate shape offsets among both faces
+    for a in range(5023):
+        shape_offset_smplbase_to_smplx[a, 0] = smpl_neutral_vertices_real[a, 0] - deca_neutral_vertices[a, 0]
+        shape_offset_smplbase_to_smplx[a, 1] = smpl_neutral_vertices_real[a, 1] - deca_neutral_vertices[a, 1]
+        shape_offset_smplbase_to_smplx[a, 2] = smpl_neutral_vertices_real[a, 2] - deca_neutral_vertices[a, 2]
+
+
     num_vertices = deca_neutral_vertices.shape[0]
     num_coords = deca_neutral_vertices.shape[1]
-    neutral_offsets = torch.zeros(num_vertices, num_coords)
-    for a in range (num_vertices):
-        for b in range (num_coords):
-            neutral_offsets[a, b] = deca_neutral_vertices[a, b] - smpl_neutral_vertices[a, b]
 
     # NORMAL HEAD (NO EXPRESSION)
     normal_body_vertices = smpl_body_template
@@ -123,8 +135,11 @@ def main(args):
     for a in range(num_vertices):
         for b in range(num_coords):
             selected_vertices[a, b] += normal_deca_offsets[a, b]
-            selected_vertices[a, b] += neutral_offsets[a, b]
+
+            # If next offsets are commented, final body won't have lips correction but will have better neck
+            selected_vertices[a, b] -= shape_offset_smplbase_to_smplx[a, b]
     head_vertices_no_expression = selected_vertices
+
 
 
     # EXPRESSION BODY
@@ -141,7 +156,9 @@ def main(args):
     for a in range(num_vertices):
         for b in range(num_coords):
             selected_vertices[a, b] += exp_deca_offsets[a, b]
-            selected_vertices[a, b] += neutral_offsets[a, b]
+
+            # If next offsets are commented, final body won't have lips correction but will have better neck
+            selected_vertices[a, b] -= shape_offset_smplbase_to_smplx[a, b]
     head_vertices_expression = selected_vertices
 
 
@@ -205,15 +222,16 @@ def show_mesh(vertices, model, head_idxs, head_color):
     o3d.visualization.draw_geometries([mesh])
 
 
-def applyTransform(vertices, head_idxs):
+def applyTransform(vertices):
     # Apply manual transformations if desired
     # Add offset to y coordinate
-    #vertices[head_idxs, 1] += 0.295
+    vertices[:, 1] += 0.295
     # Add offset to z coordinate
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    vertices[:] *= 0.95
+    #vertices[:] *= 0.95
+    return vertices
 
 def save_obj(filename, vertices, faces):
     vertices = vertices
