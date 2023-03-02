@@ -15,8 +15,8 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 
 def main(args):
 
-    # --------------------------- INIT PARAMS ---------------------------
-    show_meshes = False
+    # --------------------------- MODELS INIT PARAMS ---------------------------
+    show_meshes = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -38,22 +38,17 @@ def main(args):
     expdata = datasets.TestData(args.exp_path, iscrop=args.iscrop, face_detector=args.detector)
 
 
-    # --------------------------- RUN MODELS ---------------------------
-
-    # ------------ SMPLX ------------
-    smpl_model = smplx.create(model_folder, model_type='smplx',
-                         gender=gender,
-                         ext=ext)
-
-    # PARAMETERS
+    # ------------ CREATE SMPLX MODEL ------------w
+    # Body Translation
+    global_position = apply_global_translation(x=5.0, y=5.0, z=0.0)
     # Body orientation
     global_orient = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
     # Body pose
     body_pose = torch.zeros([1, 63], dtype=torch.float32)
     # 1º joint left leg
-    #body_pose[0, :3] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, :3] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # 1º joint rigth leg
-    #body_pose[0, 3:6] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, 3:6] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
     body_pose[0, 6:9] = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
@@ -61,14 +56,13 @@ def main(args):
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
     smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
 
-    smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
-                   return_verts=True,
-                   global_orient=global_orient,
-                   body_pose=body_pose)
-    smpl_vertices = smpl_output.vertices.detach().cpu().numpy().squeeze()
-    smpl_joints = smpl_output.joints.detach().cpu().numpy().squeeze()
+    smpl_model = smplx.create(model_folder, model_type='smplx',
+                         gender=gender,
+                         ext=ext)
 
-    # ------------ DECA ------------
+    smpl_body_template = smpl_model.v_template
+
+    # ------------ CREATE DECA MODEL ------------
     deca_cfg.model.use_tex = args.useTex
     deca_cfg.rasterizer_type = args.rasterizer_type
     deca = DECA(config=deca_cfg, device=device)
@@ -78,11 +72,13 @@ def main(args):
     name_exp = expdata[i]['imagename']
     images = testdata[i]['image'].to(device)[None, ...]
 
+    # ------------ RUN DECA TO GENERATE HEAD MODELS ------------
+    # Get dict to generate no expression head model
     with torch.no_grad():
         id_codedict = deca.encode(images)
-
     id_opdict = deca.decode(id_codedict, rendering=False, vis_lmk=False, use_detail=False, return_vis=False)
 
+    # Get dict to generate expression head model
     # -- expression transfer
     # exp code from image
     exp_images = expdata[i]['image'].to(device)[None, ...]
@@ -95,7 +91,7 @@ def main(args):
     transfer_opdict = deca.decode(id_codedict, rendering=False, vis_lmk=False, use_detail=False, return_vis=False)
 
 
-    # --------------------------- MODELS MIXING ---------------------------
+    # ------------ SWAP DECA HEAD TO SMPLX TEMPLATE BEFORE APPLYING TRANSFORMS OR DEFORMATIONS ------------
     import pickle
     with open("D:\-DYDDV - URJC\SEDDI\smplx-deca-copia\smplx-deca\smplx_deca_main\deca\data\generic_model.pkl", "rb") as f:
         generic_deca = pickle.load(f, encoding='latin1')
@@ -105,8 +101,7 @@ def main(args):
     deca_neutral_vertices = generic_deca['v_template']
     smpl_neutral_vertices = generic_smpl['v_template']
 
-
-    # 1º offsets among neutral deca and neutral smpl
+    # Offsets among neutral deca and neutral smpl
     num_vertices = deca_neutral_vertices.shape[0]
     num_coords = deca_neutral_vertices.shape[1]
     neutral_offsets = torch.zeros(num_vertices, num_coords)
@@ -114,13 +109,11 @@ def main(args):
         for b in range (num_coords):
             neutral_offsets[a, b] = deca_neutral_vertices[a, b] - smpl_neutral_vertices[a, b]
 
-    neutral_vertices = generic_deca['v_template']
-
-
-    # NORMAL BODY (NO EXPRESSION)
-    normal_body_vertices = smpl_vertices.copy()
+    # NORMAL HEAD (NO EXPRESSION)
+    normal_body_vertices = smpl_body_template
 
         # 2º offsets deca generated mesh and deca neutral
+    neutral_vertices = generic_deca['v_template']
     normal_deca_offsets = id_opdict['verts'] - neutral_vertices
     normal_deca_offsets = normal_deca_offsets.squeeze(0)
 
@@ -131,23 +124,14 @@ def main(args):
         for b in range(num_coords):
             selected_vertices[a, b] += normal_deca_offsets[a, b]
             selected_vertices[a, b] += neutral_offsets[a, b]
-
-    # ----- TESTING -----
-    # normal_body_vertices[head_idxs, :] != smpl_neutral_vertices
-    # Con estas dos lineas la cabeza sale normal, sin boca abierta.
-    #selected_vertices = neutral_vertices - smpl_neutral_vertices
-    #selected_vertices[:, 1] += 1.295
-    #selected_vertices = smpl_vertices.copy()[head_idxs]
-    # -------------------
-
-    # applyTransform(selected_vertices, head_idxs=head_idxs)
-    normal_body_vertices[head_idxs] = selected_vertices
+    head_vertices_no_expression = selected_vertices
 
 
     # EXPRESSION BODY
-    expression_body_vertices = smpl_vertices.copy()
+    expression_body_vertices = smpl_body_template
 
         # 2º offsets deca generated mesh and deca neutral
+    neutral_vertices = generic_deca['v_template']
     exp_deca_offsets = transfer_opdict['verts'] - neutral_vertices
     exp_deca_offsets = exp_deca_offsets.squeeze(0)
 
@@ -158,29 +142,50 @@ def main(args):
         for b in range(num_coords):
             selected_vertices[a, b] += exp_deca_offsets[a, b]
             selected_vertices[a, b] += neutral_offsets[a, b]
-    # applyTransform(selected_vertices, head_idxs=head_idxs)
-    expression_body_vertices[head_idxs] = selected_vertices
+    head_vertices_expression = selected_vertices
+
+
+
+    # Calculate final model with orientation, smplx-expression, shape betas, etc...
+    # For a DECA head generated with no expression from image
+    smpl_model.v_template[head_idxs] = head_vertices_no_expression
+    smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
+                   return_verts=True,
+                   global_orient=global_orient,
+                   body_pose=body_pose,
+                   transl=global_position)
+    smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
+    smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
+
+    # Calculate final model with orientation, smplx-expression, shape betas, etc...
+    # For a DECA head generated with expression from image
+    smpl_model.v_template[head_idxs] = head_vertices_expression
+    smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
+                   return_verts=True,
+                   global_orient=global_orient,
+                   body_pose=body_pose,
+                   transl=global_position)
+    smpl_vertices_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
 
 
 
     # --------------------------- OUTPUT INFO ---------------------------
-    print('Vertices shape (SMPLX) =', smpl_vertices.shape)
-    print('Joints shape (SMPLX) =', smpl_joints.shape)
+    print('Vertices shape (SMPLX) =', smpl_vertices_no_expression.shape)
+    print('Joints shape (SMPLX) =', smpl_joints_body.shape)
 
     # --------------------------- SAVE MODELS ---------------------------
     image_name = name
     for save_type in ['reconstruction', 'animation']:
-    #for save_type in ['reconstruction']:
         if args.saveObj:
             save_path = 'TestSamples/' + save_type +'_' +image_name+'_exp'+name_exp+'.obj'
             if save_type == 'reconstruction':
-                save_obj(save_path, normal_body_vertices, smpl_model.faces)
+                save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
                 if show_meshes:
-                    show_mesh(normal_body_vertices, smpl_model, head_idxs, head_color)
+                    show_mesh(smpl_vertices_no_expression, smpl_model, head_idxs, head_color)
             else:
-                save_obj(save_path, expression_body_vertices, smpl_model.faces)
+                save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
                 if show_meshes:
-                    show_mesh(expression_body_vertices, smpl_model, head_idxs, head_color)
+                    show_mesh(smpl_vertices_expression, smpl_model, head_idxs, head_color)
             if os.path.exists(save_path):
                 print(f'Successfully saved {save_path}')
             else:
@@ -224,6 +229,13 @@ def apply_global_orientation(x_degrees = 0, y_degrees=0, z_degrees=0):
     global_orient[0, 2] = z_degrees
     degrees_to_rads = 3.14159/180
     global_orient *= degrees_to_rads
+    return global_orient
+
+def apply_global_translation(x = 0, y=0, z=0):
+    global_orient = torch.zeros([1, 3], dtype=torch.float32)
+    global_orient[0, 0] = x
+    global_orient[0, 1] = y
+    global_orient[0, 2] = z
     return global_orient
 
 
