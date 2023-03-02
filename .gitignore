@@ -1,0 +1,16 @@
+
+smplx_deca_main/deca/data/deca_model.tar
+smplx_deca_main/smplx/smpl-models/models/smplx/SMPLX_NEUTRAL.pkl
+smplx_deca_main/smplx/smpl-models/models/smplx/SMPLX_MALE.pkl
+smplx_deca_main/smplx/smpl-models/models/smplx/SMPLX_FEMALE.pkl
+smplx_deca_main/smplx/smpl-models/models/smplh/SMPLH_male.pkl
+smplx_deca_main/smplx/smpl-models/models/smplh/SMPLH_female.pkl
+smplx_deca_main/smplx/smpl-models/models/smplh/MANO_RIGHT.pkl
+smplx_deca_main/smplx/smpl-models/models/smplh/MANO_LEFT.pkl
+smplx_deca_main/smplx/smpl-models/models/smpl/SMPL_NEUTRAL.pkl
+smplx_deca_main/smplx/smpl-models/models/smpl/SMPL_MALE.pkl
+smplx_deca_main/smplx/smpl-models/models/smpl/SMPL_FEMALE.pkl
+smplx_deca_main/smplx/smpl-models/models/flame/flame_static_embedding.pkl
+smplx_deca_main/smplx/smpl-models/models/flame/FLAME_NEUTRAL.pkl
+smplx_deca_main/smplx/smpl-models/models/flame/FLAME_MALE.pkl
+smplx_deca_main/smplx/smpl-models/models/flame/FLAME_FEMALE.pkl
