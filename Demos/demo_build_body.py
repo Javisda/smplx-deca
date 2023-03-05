@@ -16,7 +16,7 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = False
+    show_meshes = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -98,13 +98,20 @@ def main(args):
 
     deca_neutral_vertices = generic_deca['v_template']
 
-    #Offsets among neutral deca and neutral smpl
-        # Smpl is posed differently as deca, so first we align them. To do so, calculate an offset with
-        # first vertex as reference (as it wont change much) -> NEED TO CHECK THIS
+    # OFFSETS AMONG NEUTRAL DECA AND NEUTRAL SMPLX HEADS
+    # Smpl is posed differently as deca, so first we align them.
     smpl_neutral_vertices_real = smpl_body_template[head_idxs].numpy().copy()
-    smpl_base_to_deca_coords_offset_x = smpl_neutral_vertices_real[0, 0] - deca_neutral_vertices[0, 0]
-    smpl_base_to_deca_coords_offset_y = smpl_neutral_vertices_real[0, 1] - deca_neutral_vertices[0, 1]
-    smpl_base_to_deca_coords_offset_z = smpl_neutral_vertices_real[0, 2] - deca_neutral_vertices[0, 2]
+
+        # Find head gravity centers
+    sumed_coords = torch.sum(smpl_body_template[head_idxs], dim=0)
+    center_of_gravity_smplx = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
+    sumed_coords = torch.sum(torch.tensor(torch.tensor(deca_neutral_vertices)), dim=0)
+    center_of_gravity_deca_neutral = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
+
+        # Get head to head offsets (having gravity centers as reference)
+    smpl_base_to_deca_coords_offset_x = center_of_gravity_smplx[0] - center_of_gravity_deca_neutral[0]
+    smpl_base_to_deca_coords_offset_y = center_of_gravity_smplx[1] - center_of_gravity_deca_neutral[1]
+    smpl_base_to_deca_coords_offset_z = center_of_gravity_smplx[2] - center_of_gravity_deca_neutral[2]
         # Having the offsets, translate the smplx head to align deca
     for a in range(5023):
         smpl_neutral_vertices_real[a, 0] -= smpl_base_to_deca_coords_offset_x
