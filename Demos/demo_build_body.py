@@ -16,7 +16,7 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = True
+    show_meshes = False
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -40,7 +40,7 @@ def main(args):
 
     # ------------ CREATE SMPLX MODEL ------------w
     # Body Translation
-    global_position = apply_global_translation(x=5.0, y=5.0, z=0.0)
+    global_position = apply_global_translation(x=0.0, y=0.0, z=0.0)
     # Body orientation
     global_orient = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
     # Body pose
@@ -138,6 +138,7 @@ def main(args):
 
             # If next offsets are commented, final body won't have lips correction but will have better neck
             selected_vertices[a, b] -= shape_offset_smplbase_to_smplx[a, b]
+    selected_vertices = applyTransform(selected_vertices)
     head_vertices_no_expression = selected_vertices
 
 
@@ -225,12 +226,12 @@ def show_mesh(vertices, model, head_idxs, head_color):
 def applyTransform(vertices):
     # Apply manual transformations if desired
     # Add offset to y coordinate
-    vertices[:, 1] += 0.295
+    #vertices[:, 1] += 0.295
     # Add offset to z coordinate
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 0.95
+    #vertices[:] *= 0.9
     return vertices
 
 def save_obj(filename, vertices, faces):
