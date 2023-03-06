@@ -53,7 +53,7 @@ def main(args):
     body_pose[0, 6:9] = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
-    smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
+    smpl_betas = torch.ones([1, 10], dtype=torch.float32)
     smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
 
     smpl_model = smplx.create(model_folder, model_type='smplx',
@@ -91,7 +91,7 @@ def main(args):
     transfer_opdict = deca.decode(id_codedict, rendering=False, vis_lmk=False, use_detail=False, return_vis=False)
 
 
-    # ------------ SWAP DECA HEAD TO SMPLX TEMPLATE BEFORE APPLYING TRANSFORMS OR DEFORMATIONS ------------
+    # ------------ CALCULATE HEAD VERTICES BASE ON OFFSETS WITH MULTIPLE MODELS ------------
     import pickle
     with open("D:\-DYDDV - URJC\SEDDI\smplx-deca-copia\smplx-deca\smplx_deca_main\deca\data\generic_model.pkl", "rb") as f:
         generic_deca = pickle.load(f, encoding='latin1')
@@ -117,9 +117,6 @@ def main(args):
 
 
 
-    num_vertices = deca_neutral_vertices.shape[0]
-    num_coords = deca_neutral_vertices.shape[1]
-
     # NORMAL HEAD (NO EXPRESSION)
     normal_body_vertices = smpl_body_template
 
@@ -137,7 +134,6 @@ def main(args):
     selected_vertices = applyTransform(selected_vertices)
         # Replace vertices
     head_vertices_no_expression = selected_vertices
-
 
 
     # EXPRESSION BODY
@@ -160,9 +156,27 @@ def main(args):
 
 
 
-    # Calculate final model with orientation, smplx-expression, shape betas, etc...
-    # For a DECA head generated with no expression from image
-    smpl_model.v_template[head_idxs] = head_vertices_no_expression.float()
+    # --------------------- BODY MODEL GENERATION ---------------------
+    # GENERATE MODEL WITHOUT EXPRESSION
+        # First do a forward pass through the model to get body shape
+    smpl_output = smpl_model(betas=smpl_betas, return_verts=True)
+        # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
+    body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
+    body_only_betas[head_idxs] = head_vertices_no_expression.float()
+    smpl_model.v_template = body_only_betas
+        # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
+    smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
+    smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
+                   global_orient=global_orient,
+                   body_pose=body_pose,
+                   transl=global_position)
+
+    smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
+    smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
+
+    """
+    # Old implementation. Head was influenced by betas and was more adjustable to body proportions.
+        smpl_model.v_template[head_idxs] = head_vertices_no_expression.float()
     smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
                    return_verts=True,
                    global_orient=global_orient,
@@ -170,16 +184,23 @@ def main(args):
                    transl=global_position)
     smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
     smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
+    """
 
-    # Calculate final model with orientation, smplx-expression, shape betas, etc...
-    # For a DECA head generated with expression from image
-    smpl_model.v_template[head_idxs] = head_vertices_expression.float()
-    smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
-                   return_verts=True,
+
+
+
+    # GENERATE MODEL WITH EXPRESSION
+        # First isn't necessary anymore as it would shape again the body and accumulate
+        # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
+    body_only_betas[head_idxs] = head_vertices_expression.float()
+    smpl_model.v_template = body_only_betas
+        # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
+    smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
                    global_orient=global_orient,
                    body_pose=body_pose,
                    transl=global_position)
     smpl_vertices_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
+
 
 
 
@@ -227,7 +248,7 @@ def applyTransform(vertices):
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 0.9
+    #vertices[:] *= 1.1
     return vertices
 
 def save_obj(filename, vertices, faces):
