@@ -102,11 +102,17 @@ def main(args):
     # Smpl is posed differently as deca, so first we align them.
     smpl_neutral_head_vertices = smpl_body_template[head_idxs].numpy().copy()
 
+
         # Find head gravity centers
     sumed_coords = torch.sum(smpl_body_template[head_idxs], dim=0)
     center_of_gravity_smplx = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
-    sumed_coords = torch.sum(torch.tensor(torch.tensor(deca_neutral_vertices)), dim=0)
+    sumed_coords = torch.sum(torch.tensor(deca_neutral_vertices), dim=0)
     center_of_gravity_deca_neutral = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
+
+    # TESTING
+    #center_of_gravity_smplx = getGravityCenter(mesh=smpl_body_template[head_idxs], head_idxs=head_idxs)
+    #center_of_gravity_deca_neutral = getGravityCenter(mesh=deca_neutral_vertices, head_idxs=head_idxs)
+
 
         # Get head to head offsets (having gravity centers as reference)
     smpl_base_to_deca_coords_offsets = center_of_gravity_smplx - center_of_gravity_deca_neutral
@@ -153,6 +159,21 @@ def main(args):
     selected_vertices = applyTransform(selected_vertices)
         # Replace vertices
     head_vertices_expression = selected_vertices
+
+
+    # LOOP DE ENTRENAMIENTO
+    # 1º Coger cabeza generada en el paso anterior (head_vertices_no_expression)
+    # 2º Crear modelo que va a registrar las 10 betas e iniciarlas a un valor aleatorio
+    # --- Loopear pasos 3º-8º ---
+        # 3º Con estas betas generar un cuerpo con smplx
+        # 4º Quedarnos con la cabeza generada con smplx
+        # 5º Alinear cabezas de los pasos 1 y 4
+        # 6º Hallar las distancias entre ambas cabezas (funtion loss)
+        # 7º Hacer un step en la función mediante el loss del paso 6 y usando el optimizador Adam
+        # 8º Con el paso 7 habremos conseguido nuevos valores de beta, con los cuales repetiremos los pasos anteriores
+    # 9º A partir de aquí deberíamos tener unas betas que generan un cuerpo acorde a la cabeza de DECA.
+    # Por lo que con estas betas generamos el cuerpo real, pasando al código de abajo ya de forma normal.
+
 
 
 
@@ -225,6 +246,15 @@ def main(args):
                 print(f'Successfully saved {save_path}')
             else:
                 print(f'Error: Failed to save {save_path}')
+
+
+
+def getGravityCenter(mesh, head_idxs=None):
+    if not torch.is_tensor(mesh):
+        mesh = torch.tensor(mesh)
+    summed_coords = torch.sum(mesh, dim=0)
+    gravity_center = torch.div(summed_coords, mesh[head_idxs].shape[0])
+    return gravity_center
 
 def show_mesh(vertices, model, head_idxs, head_color):
     mesh = o3d.geometry.TriangleMesh()
