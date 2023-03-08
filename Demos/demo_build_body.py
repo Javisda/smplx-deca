@@ -53,7 +53,7 @@ def main(args):
     body_pose[0, 6:9] = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
-    smpl_betas = torch.ones([1, 10], dtype=torch.float32)
+    smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
     smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
 
     smpl_model = smplx.create(model_folder, model_type='smplx',
@@ -166,29 +166,32 @@ def main(args):
     # 1º Coger cabeza generada en el paso anterior (head_vertices_no_expression)
     deca_head_copy = head_vertices_no_expression
     # 2º Crear modelo que va a registrar las 10 betas e iniciarlas a un valor aleatorio
-    b0 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b1 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b2 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b3 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b4 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b5 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b6 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b7 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b8 = torch.randn(1, requires_grad=True, dtype=torch.float32)
-    b9 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b0 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b1 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b2 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b3 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b4 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b5 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b6 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b7 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b8 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
+    b9 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
     from torch import nn
     from torch.nn import Parameter
     model = [Parameter(b0), Parameter(b1),Parameter(b2),Parameter(b3),Parameter(b4),Parameter(b5),Parameter(b6),Parameter(b7),Parameter(b8),Parameter(b9)]
-    lr = 0.1
+    lr = 0.01
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model, lr=lr)
-    previous_loss = 9999999
+    best_loss = 9999999
     best_betas = torch.zeros(10, dtype=torch.float32)
+    body_template_smplx = smpl_model.v_template.clone()
     # --- Loop pasos 3º-8º ---
     for epoch in range(1000):
         optimizer.zero_grad()
         # 3º Con estas betas generar un cuerpo con smplx
         smpl_training_betas = torch.cat((model[0], model[1], model[2], model[3], model[4], model[5], model[6], model[7], model[8], model[9]), 0).unsqueeze(0)
+            # Reestablecer malla del modelo para que no se acumulen las betas
+        smpl_model.v_template = body_template_smplx
         smpl_training_output = smpl_model(betas=smpl_training_betas, return_verts=True)
         # 4º Quedarnos con la cabeza generada con smplx
         smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
@@ -205,14 +208,15 @@ def main(args):
         #loss = criterion(deca_head_copy, smpl_training_aligned)
         loss.backward()
         optimizer.step()
-        if previous_loss > loss:
-            previous_loss = loss
+        if best_loss > loss:
+            best_loss = loss
             best_betas = smpl_training_betas
-            print("MEJORA")
+            #print("MEJORA")
         # 8º Con el paso 7 habremos conseguido nuevos valores de beta, con los cuales repetiremos los pasos anteriores
-        print("Loss: " + str(loss))
-        print("Updated Betas: ", [beta.item() for beta in model])
-    print("Mejor loss: {}", previous_loss)
+        #print("Loss: " + str(loss))
+        #print("Updated Betas: ", [beta.item() for beta in model])
+    print("Betas: ", [beta.item() for beta in model])
+    print("Mejor loss: {}", best_loss)
     # 9º A partir de aquí deberíamos tener unas betas que generan un cuerpo acorde a la cabeza de DECA.
     # Por lo que con estas betas generamos el cuerpo real, pasando al código de abajo ya de forma normal.
 
@@ -236,19 +240,6 @@ def main(args):
 
     smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
     smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
-
-    """
-    # Old implementation. Head was influenced by betas and was more adjustable to body proportions.
-        smpl_model.v_template[head_idxs] = head_vertices_no_expression.float()
-    smpl_output = smpl_model(betas=smpl_betas, expression=smpl_expression,
-                   return_verts=True,
-                   global_orient=global_orient,
-                   body_pose=body_pose,
-                   transl=global_position)
-    smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
-    smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
-    """
-
 
 
 
@@ -320,7 +311,7 @@ def applyTransform(vertices):
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 1.1
+    vertices[:] *= 0.9
     return vertices
 
 def save_obj(filename, vertices, faces):
