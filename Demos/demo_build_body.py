@@ -104,14 +104,15 @@ def main(args):
 
 
         # Find head gravity centers
+    """
     sumed_coords = torch.sum(smpl_body_template[head_idxs], dim=0)
     center_of_gravity_smplx = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
     sumed_coords = torch.sum(torch.tensor(deca_neutral_vertices), dim=0)
     center_of_gravity_deca_neutral = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
-
+    """
     # TESTING
-    #center_of_gravity_smplx = getGravityCenter(mesh=smpl_body_template[head_idxs], head_idxs=head_idxs)
-    #center_of_gravity_deca_neutral = getGravityCenter(mesh=deca_neutral_vertices, head_idxs=head_idxs)
+    center_of_gravity_smplx = getGravityCenter(mesh=smpl_body_template[head_idxs])
+    center_of_gravity_deca_neutral = getGravityCenter(mesh=deca_neutral_vertices)
 
 
         # Get head to head offsets (having gravity centers as reference)
@@ -163,14 +164,55 @@ def main(args):
 
     # LOOP DE ENTRENAMIENTO
     # 1º Coger cabeza generada en el paso anterior (head_vertices_no_expression)
+    deca_head_copy = head_vertices_no_expression
     # 2º Crear modelo que va a registrar las 10 betas e iniciarlas a un valor aleatorio
-    # --- Loopear pasos 3º-8º ---
+    b0 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b1 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b2 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b3 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b4 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b5 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b6 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b7 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b8 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    b9 = torch.randn(1, requires_grad=True, dtype=torch.float32)
+    from torch import nn
+    from torch.nn import Parameter
+    model = [Parameter(b0), Parameter(b1),Parameter(b2),Parameter(b3),Parameter(b4),Parameter(b5),Parameter(b6),Parameter(b7),Parameter(b8),Parameter(b9)]
+    lr = 0.1
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model, lr=lr)
+    previous_loss = 9999999
+    best_betas = torch.zeros(10, dtype=torch.float32)
+    # --- Loop pasos 3º-8º ---
+    for epoch in range(1000):
+        optimizer.zero_grad()
         # 3º Con estas betas generar un cuerpo con smplx
+        smpl_training_betas = torch.cat((model[0], model[1], model[2], model[3], model[4], model[5], model[6], model[7], model[8], model[9]), 0).unsqueeze(0)
+        smpl_training_output = smpl_model(betas=smpl_training_betas, return_verts=True)
         # 4º Quedarnos con la cabeza generada con smplx
+        smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
         # 5º Alinear cabezas de los pasos 1 y 4
-        # 6º Hallar las distancias entre ambas cabezas (funtion loss)
+        center_of_gravity_training_smpl = getGravityCenter(mesh=smpl_training_head[head_idxs])
+        center_of_gravity_training_deca = getGravityCenter(mesh=deca_head_copy)
+        head_training_offsets = center_of_gravity_training_smpl - center_of_gravity_training_deca
+        smpl_training_aligned = torch.sub(torch.tensor(smpl_training_head[head_idxs]), head_training_offsets)
+        # 6º Hallar las distancias entre ambas cabezas (function loss)
+        distances = torch.sum(torch.sub(deca_head_copy, smpl_training_aligned), dim=1)
+        total_distance = distances.sum().unsqueeze(0)
         # 7º Hacer un step en la función mediante el loss del paso 6 y usando el optimizador Adam
+        loss = criterion(total_distance.float(), torch.zeros((1), dtype=torch.float32))
+        #loss = criterion(deca_head_copy, smpl_training_aligned)
+        loss.backward()
+        optimizer.step()
+        if previous_loss > loss:
+            previous_loss = loss
+            best_betas = smpl_training_betas
+            print("MEJORA")
         # 8º Con el paso 7 habremos conseguido nuevos valores de beta, con los cuales repetiremos los pasos anteriores
+        print("Loss: " + str(loss))
+        print("Updated Betas: ", [beta.item() for beta in model])
+    print("Mejor loss: {}", previous_loss)
     # 9º A partir de aquí deberíamos tener unas betas que generan un cuerpo acorde a la cabeza de DECA.
     # Por lo que con estas betas generamos el cuerpo real, pasando al código de abajo ya de forma normal.
 
@@ -180,7 +222,7 @@ def main(args):
     # --------------------- BODY MODEL GENERATION ---------------------
     # GENERATE MODEL WITHOUT EXPRESSION
         # First do a forward pass through the model to get body shape
-    smpl_output = smpl_model(betas=smpl_betas, return_verts=True)
+    smpl_output = smpl_model(betas=best_betas, return_verts=True)
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
     body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
     body_only_betas[head_idxs] = head_vertices_no_expression.float()
@@ -249,11 +291,11 @@ def main(args):
 
 
 
-def getGravityCenter(mesh, head_idxs=None):
+def getGravityCenter(mesh):
     if not torch.is_tensor(mesh):
         mesh = torch.tensor(mesh)
     summed_coords = torch.sum(mesh, dim=0)
-    gravity_center = torch.div(summed_coords, mesh[head_idxs].shape[0])
+    gravity_center = torch.div(summed_coords, mesh.shape[0])
     return gravity_center
 
 def show_mesh(vertices, model, head_idxs, head_color):
