@@ -16,7 +16,7 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = True
+    show_meshes = False
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -185,6 +185,10 @@ def main(args):
     best_loss = 9999999
     best_betas = torch.zeros(10, dtype=torch.float32)
     body_template_smplx = smpl_model.v_template.clone()
+    # Tensorboard testing
+    from torch.utils.tensorboard import SummaryWriter
+    writer = SummaryWriter(f'tensorboard/tensorboard_test')
+    step = 0
     # --- Loop pasos 3º-8º ---
     for epoch in range(1000):
         optimizer.zero_grad()
@@ -215,6 +219,11 @@ def main(args):
         # 8º Con el paso 7 habremos conseguido nuevos valores de beta, con los cuales repetiremos los pasos anteriores
         #print("Loss: " + str(loss))
         #print("Updated Betas: ", [beta.item() for beta in model])
+
+        # Tensorboard testing
+        writer.add_scalar('Training loss', loss, global_step=step)
+        step += 1
+
     print("Betas: ", [beta.item() for beta in model])
     print("Mejor loss: {}", best_loss)
     # 9º A partir de aquí deberíamos tener unas betas que generan un cuerpo acorde a la cabeza de DECA.
