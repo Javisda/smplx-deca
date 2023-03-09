@@ -16,7 +16,7 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = False
+    show_meshes = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -190,7 +190,7 @@ def main(args):
     writer = SummaryWriter(f'tensorboard/tensorboard_test')
     step = 0
     # --- Loop pasos 3º-8º ---
-    for epoch in range(1000):
+    for epoch in range(100):
         optimizer.zero_grad()
         # 3º Con estas betas generar un cuerpo con smplx
         smpl_training_betas = torch.cat((model[0], model[1], model[2], model[3], model[4], model[5], model[6], model[7], model[8], model[9]), 0).unsqueeze(0)
@@ -238,7 +238,7 @@ def main(args):
     smpl_output = smpl_model(betas=best_betas, return_verts=True)
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
     body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
-    body_only_betas[head_idxs] = head_vertices_no_expression.float()
+    body_only_betas[head_idxs] = head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
@@ -255,7 +255,7 @@ def main(args):
     # GENERATE MODEL WITH EXPRESSION
         # First isn't necessary anymore as it would shape again the body and accumulate
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
-    body_only_betas[head_idxs] = head_vertices_expression.float()
+    body_only_betas[head_idxs] = head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
@@ -290,6 +290,30 @@ def main(args):
                 print(f'Error: Failed to save {save_path}')
 
 
+
+def head_smoothing(deca_head, smplx_head, head_idx):
+    # Weight loading
+    abs_path = os.path.abspath('mask_1')
+    weights = np.fromfile(abs_path, 'float32')
+
+    # Calculations
+    # First one doesn´t work. Why?
+    """
+    head_weights = torch.tensor(weights[head_idx]).repeat(1, 3).view(deca_head.shape[0], -1)
+    smpl_coords = smplx_head * head_weights
+    deca_coords = deca_head * (torch.ones_like(deca_head) - head_weights)
+    new_head = smpl_coords + deca_coords
+    """
+
+    head_weights = torch.tensor(weights[head_idx])
+    new_head = torch.zeros_like(deca_head)
+    for i in range (5023):
+        for j in range (3):
+            smpl_coord = smplx_head[i, j] * head_weights[i]
+            deca_coord = deca_head[i, j] * (1 - head_weights[i])
+            new_head[i, j] = smpl_coord + deca_coord
+
+    return new_head
 
 def getGravityCenter(mesh):
     if not torch.is_tensor(mesh):
