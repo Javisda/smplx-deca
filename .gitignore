@@ -14,3 +14,4 @@ smplx_deca_main/smplx/smpl-models/models/flame/flame_static_embedding.pkl
 smplx_deca_main/smplx/smpl-models/models/flame/FLAME_NEUTRAL.pkl
 smplx_deca_main/smplx/smpl-models/models/flame/FLAME_MALE.pkl
 smplx_deca_main/smplx/smpl-models/models/flame/FLAME_FEMALE.pkl
+Demos/tensorboard/tensorboard_test
