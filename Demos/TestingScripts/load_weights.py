@@ -13,7 +13,7 @@ print(weights.max())
 
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
-    abs_path = os.path.abspath('test')
+    abs_path = os.path.abspath('mask_1') # Loads the mask
     weights = numpy.fromfile(abs_path, 'float32')
 
     # Calculations

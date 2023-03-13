@@ -4,6 +4,7 @@ import argparse
 import torch
 import numpy as np
 import open3d as o3d
+import enum
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from smplx_deca_main.deca.decalib.deca import DECA
@@ -50,7 +51,7 @@ def main(args):
     # 1º joint rigth leg
     # body_pose[0, 3:6] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
-    body_pose[0, 6:9] = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    body_pose[0, 6:9] = apply_global_orientation(x_degrees=45.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
@@ -162,72 +163,81 @@ def main(args):
     head_vertices_expression = selected_vertices
 
 
-    # LOOP DE ENTRENAMIENTO
-    # 1º Coger cabeza generada en el paso anterior (head_vertices_no_expression)
+    # BODY FITTING
+    # 1º Get DECA generated head to approximate body
     deca_head_copy = head_vertices_no_expression
-    # 2º Crear modelo que va a registrar las 10 betas e iniciarlas a un valor aleatorio
-    b0 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b1 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b2 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b3 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b4 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b5 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b6 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b7 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b8 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    b9 = torch.zeros(1, requires_grad=True, dtype=torch.float32)
-    from torch import nn
-    from torch.nn import Parameter
-    model = [Parameter(b0), Parameter(b1),Parameter(b2),Parameter(b3),Parameter(b4),Parameter(b5),Parameter(b6),Parameter(b7),Parameter(b8),Parameter(b9)]
-    lr = 0.01
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model, lr=lr)
-    best_loss = 9999999
+    # 2º Hyper-parameters
+    lr = 0.2
+    current_iters = 0
+    consecutive_iters_checkpoint = 20
+    shape = smpl_model.betas
+    shape.requires_grad = True
+    finished = False
+    convergence_status = ConvergenceStatus.STUCK
+    debug_anomalies = False
+    optimizer = torch.optim.Adam([shape], lr=lr)
+    checkpoint_error = None
+    best_error = 1e20
+    max_iters = 1000
     best_betas = torch.zeros(10, dtype=torch.float32)
     body_template_smplx = smpl_model.v_template.clone()
-    # Tensorboard testing
+
+    # Tensorboard Initialization
     from torch.utils.tensorboard import SummaryWriter
     writer = SummaryWriter(f'tensorboard/tensorboard_test')
     step = 0
-    # --- Loop pasos 3º-8º ---
-    for epoch in range(100):
-        optimizer.zero_grad()
-        # 3º Con estas betas generar un cuerpo con smplx
-        smpl_training_betas = torch.cat((model[0], model[1], model[2], model[3], model[4], model[5], model[6], model[7], model[8], model[9]), 0).unsqueeze(0)
-            # Reestablecer malla del modelo para que no se acumulen las betas
-        smpl_model.v_template = body_template_smplx
-        smpl_training_output = smpl_model(betas=smpl_training_betas, return_verts=True)
-        # 4º Quedarnos con la cabeza generada con smplx
-        smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
-        # 5º Alinear cabezas de los pasos 1 y 4
-        center_of_gravity_training_smpl = getGravityCenter(mesh=smpl_training_head[head_idxs])
-        center_of_gravity_training_deca = getGravityCenter(mesh=deca_head_copy)
-        head_training_offsets = center_of_gravity_training_smpl - center_of_gravity_training_deca
-        smpl_training_aligned = torch.sub(torch.tensor(smpl_training_head[head_idxs]), head_training_offsets)
-        # 6º Hallar las distancias entre ambas cabezas (function loss)
-        distances = torch.sum(torch.sub(deca_head_copy, smpl_training_aligned), dim=1)
-        total_distance = distances.sum().unsqueeze(0)
-        # 7º Hacer un step en la función mediante el loss del paso 6 y usando el optimizador Adam
-        loss = criterion(total_distance.float(), torch.zeros((1), dtype=torch.float32))
-        #loss = criterion(deca_head_copy, smpl_training_aligned)
-        loss.backward()
-        optimizer.step()
-        if best_loss > loss:
-            best_loss = loss
-            best_betas = smpl_training_betas
-            #print("MEJORA")
-        # 8º Con el paso 7 habremos conseguido nuevos valores de beta, con los cuales repetiremos los pasos anteriores
-        #print("Loss: " + str(loss))
-        #print("Updated Betas: ", [beta.item() for beta in model])
 
-        # Tensorboard testing
+    # Optimization Loop
+    for epoch in range(0, max_iters):
+        save = False
+        current_iters += 1
+        optimizer.zero_grad()
+
+        # 3º Body generation with best found betas at the moment
+        #smpl_model.v_template = body_template_smplx # Reestablecer malla del modelo para que no se acumulen las betas
+        smpl_training_output = smpl_model(betas=shape, return_verts=True)
+
+        # 4º Get SMPLX generated head
+        smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
+
+        # 5º Find head to head euclidean distance without sqrt (function loss)
+        loss = (deca_head_copy - smpl_training_head[head_idxs]).pow(2).sum()
+
+        # 6º Calculate gradients, make a step in optimizer and early stoping in case of already found good betas
+        print(f"Loss: {loss}")
+        if loss < 0.005:
+            finished = True
+
+        if best_error > loss.item():
+            save = True
+
+        best_error = min(best_error, loss.item())
+        if finished:
+            convergence_status = ConvergenceStatus.TARGET_REACHED
+            break
+
+        if epoch % consecutive_iters_checkpoint == 0:
+            if checkpoint_error is not None:
+                if best_error > checkpoint_error * 0.99:
+                    break
+            checkpoint_error = best_error
+        if debug_anomalies:
+            with torch.autograd.detect_anomaly():
+                loss.backward()  # calculate derivatives
+        else:
+            loss.backward()  # calculate derivatives
+        optimizer.step()
+
+        if save:
+            best_betas = shape
+
+
+        # Tensorboard writing
         writer.add_scalar('Training loss', loss, global_step=step)
         step += 1
 
-    print("Betas: ", [beta.item() for beta in model])
-    print("Mejor loss: {}", best_loss)
-    # 9º A partir de aquí deberíamos tener unas betas que generan un cuerpo acorde a la cabeza de DECA.
-    # Por lo que con estas betas generamos el cuerpo real, pasando al código de abajo ya de forma normal.
+    print("Betas: ", [beta.item() for beta in best_betas[0]])
+    print("Mejor loss: {}", best_error)
 
 
 
@@ -238,7 +248,7 @@ def main(args):
     smpl_output = smpl_model(betas=best_betas, return_verts=True)
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
     body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
-    body_only_betas[head_idxs] = head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
+    body_only_betas[head_idxs] = head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
@@ -290,7 +300,10 @@ def main(args):
                 print(f'Error: Failed to save {save_path}')
 
 
-
+class ConvergenceStatus(enum.Enum):
+    TARGET_REACHED = enum.auto()
+    STUCK = enum.auto()
+    MAX_ITERATIONS_REACHED = enum.auto()
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
     abs_path = os.path.abspath('mask_1')
@@ -339,12 +352,12 @@ def show_mesh(vertices, model, head_idxs, head_color):
 def applyTransform(vertices):
     # Apply manual transformations if desired
     # Add offset to y coordinate
-    #vertices[:, 1] += 0.295
+    #vertices[:, 1] += 0.2
     # Add offset to z coordinate
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    vertices[:] *= 0.9
+    #vertices[:] *= 1.5
     return vertices
 
 def save_obj(filename, vertices, faces):
