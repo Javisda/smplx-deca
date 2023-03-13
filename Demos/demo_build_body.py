@@ -43,15 +43,15 @@ def main(args):
     # Body Translation
     global_position = apply_global_translation(x=0.0, y=0.0, z=0.0)
     # Body orientation
-    global_orient = apply_global_orientation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    global_orient = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
     # Body pose
     body_pose = torch.zeros([1, 63], dtype=torch.float32)
     # 1º joint left leg
-    # body_pose[0, :3] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, :3] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # 1º joint rigth leg
-    # body_pose[0, 3:6] = apply_global_orientation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, 3:6] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
-    body_pose[0, 6:9] = apply_global_orientation(x_degrees=45.0, y_degrees=0.0, z_degrees=0.0)
+    body_pose[0, 6:9] = apply_rotation(x_degrees=45.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
@@ -112,8 +112,8 @@ def main(args):
     center_of_gravity_deca_neutral = torch.div(sumed_coords, smpl_body_template[head_idxs].shape[0])
     """
     # TESTING
-    center_of_gravity_smplx = getGravityCenter(mesh=smpl_body_template[head_idxs])
-    center_of_gravity_deca_neutral = getGravityCenter(mesh=deca_neutral_vertices)
+    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_body_template[head_idxs])
+    center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
 
 
         # Get head to head offsets (having gravity centers as reference)
@@ -173,7 +173,6 @@ def main(args):
     shape = smpl_model.betas
     shape.requires_grad = True
     finished = False
-    convergence_status = ConvergenceStatus.STUCK
     debug_anomalies = False
     optimizer = torch.optim.Adam([shape], lr=lr)
     checkpoint_error = None
@@ -204,7 +203,7 @@ def main(args):
         loss = (deca_head_copy - smpl_training_head[head_idxs]).pow(2).sum()
 
         # 6º Calculate gradients, make a step in optimizer and early stoping in case of already found good betas
-        print(f"Loss: {loss}")
+        # print(f"Loss: {loss}")
         if loss < 0.005:
             finished = True
 
@@ -213,7 +212,6 @@ def main(args):
 
         best_error = min(best_error, loss.item())
         if finished:
-            convergence_status = ConvergenceStatus.TARGET_REACHED
             break
 
         if epoch % consecutive_iters_checkpoint == 0:
@@ -236,7 +234,7 @@ def main(args):
         writer.add_scalar('Training loss', loss, global_step=step)
         step += 1
 
-    print("Betas: ", [beta.item() for beta in best_betas[0]])
+    print("Best Betas: ", [beta.item() for beta in best_betas[0]])
     print("Mejor loss: {}", best_error)
 
 
@@ -281,6 +279,7 @@ def main(args):
     print('Vertices shape (SMPLX) =', smpl_vertices_no_expression.shape)
     print('Joints shape (SMPLX) =', smpl_joints_body.shape)
 
+
     # --------------------------- SAVE MODELS ---------------------------
     image_name = name
     for save_type in ['reconstruction', 'animation']:
@@ -300,21 +299,17 @@ def main(args):
                 print(f'Error: Failed to save {save_path}')
 
 
-class ConvergenceStatus(enum.Enum):
-    TARGET_REACHED = enum.auto()
-    STUCK = enum.auto()
-    MAX_ITERATIONS_REACHED = enum.auto()
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
     abs_path = os.path.abspath('mask_1')
     weights = np.fromfile(abs_path, 'float32')
 
     # Calculations
-    # First one doesn´t work. Why?
+    # First one doesn´t work correctly. Why?
     """
     head_weights = torch.tensor(weights[head_idx]).repeat(1, 3).view(deca_head.shape[0], -1)
-    smpl_coords = smplx_head * head_weights
-    deca_coords = deca_head * (torch.ones_like(deca_head) - head_weights)
+    smpl_coords = torch.mul(smplx_head, head_weights)
+    deca_coords = torch.mul(deca_head, (torch.ones_like(deca_head) - head_weights))
     new_head = smpl_coords + deca_coords
     """
 
@@ -328,7 +323,7 @@ def head_smoothing(deca_head, smplx_head, head_idx):
 
     return new_head
 
-def getGravityCenter(mesh):
+def getMeshGravityCenter(mesh):
     if not torch.is_tensor(mesh):
         mesh = torch.tensor(mesh)
     summed_coords = torch.sum(mesh, dim=0)
@@ -367,7 +362,7 @@ def save_obj(filename, vertices, faces):
     utils.write_obj(filename, vertices, faces)
     print("Model Saved")
 
-def apply_global_orientation(x_degrees = 0, y_degrees=0, z_degrees=0):
+def apply_rotation(x_degrees = 0, y_degrees=0, z_degrees=0):
     global_orient = torch.zeros([1, 3], dtype=torch.float32)
     global_orient[0, 0] = x_degrees
     global_orient[0, 1] = y_degrees
