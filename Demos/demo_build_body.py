@@ -51,7 +51,7 @@ def main(args):
     # 1º joint rigth leg
     # body_pose[0, 3:6] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
-    body_pose[0, 6:9] = apply_rotation(x_degrees=45.0, y_degrees=0.0, z_degrees=0.0)
+    body_pose[0, 6:9] = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
@@ -347,12 +347,12 @@ def show_mesh(vertices, model, head_idxs, head_color):
 def applyTransform(vertices):
     # Apply manual transformations if desired
     # Add offset to y coordinate
-    #vertices[:, 1] += 0.2
+    #vertices[:, 1] += 0.15
     # Add offset to z coordinate
     #vertices[head_idxs, 2] += 0.045
     # Add scaling
     #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 1.5
+    #vertices[:] *= 1.2
     return vertices
 
 def save_obj(filename, vertices, faces):
