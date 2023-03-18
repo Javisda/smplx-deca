@@ -22,17 +22,25 @@ from . import util
 def set_rasterizer(type = 'pytorch3d'):
     if type == 'pytorch3d':
         global Meshes, load_obj, rasterize_meshes
+        import pytorch3d
+        from pytorch3d.structures import Meshes
+        from pytorch3d.io import load_obj
+        from pytorch3d.renderer.mesh import rasterize_meshes
     elif type == 'standard':
         global standard_rasterize, load_obj
         import os
+        from .util import load_obj
         # Use JIT Compiling Extensions
         # ref: https://pytorch.org/tutorials/advanced/cpp_extension.html
-        from torch.utils.cpp_extension import load
+        from torch.utils.cpp_extension import load, CUDA_HOME
         curr_dir = os.path.dirname(__file__)
         standard_rasterize_cuda = \
-            load(name='standard_rasterize_cuda', 
-                sources=[f'{curr_dir}/rasterizer/standard_rasterize_cuda.cpp', f'{curr_dir}/rasterizer/standard_rasterize_cuda_kernel.cu'], 
-                extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7 
+            load(name='standard_rasterize_cuda',
+                 sources=[f'{curr_dir}/rasterizer/standard_rasterize_cuda.cpp',
+                          f'{curr_dir}/rasterizer/standard_rasterize_cuda_kernel.cu'],
+                 extra_cuda_cflags=['-std=c++14',
+                                    '-ccbin=$$(which gcc-7)'])  # cuda10.2 is not compatible with gcc9. Specify gcc 7
+        from standard_rasterize_cuda import standard_rasterize
         # If JIT does not work, try manually installation first
         # 1. see instruction here: pixielib/utils/rasterizer/INSTALL.md
         # 2. add this: "from .rasterizer.standard_rasterize_cuda import standard_rasterize" here
@@ -129,7 +137,8 @@ class Pytorch3dRasterizer(nn.Module):
         if h is None and w is None:
             image_size = raster_settings.image_size
         else:
-            image_size = [h, w]
+            # image_size = [h, w]
+            image_size = h  # Added
             if h>w:
                 fixed_vertices[..., 1] = fixed_vertices[..., 1]*h/w
             else:

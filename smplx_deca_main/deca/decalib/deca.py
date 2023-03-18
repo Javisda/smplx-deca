@@ -33,7 +33,7 @@ from .utils.config import cfg
 torch.backends.cudnn.benchmark = True
 
 class DECA(nn.Module):
-    def __init__(self, config=None, device='cuda'):
+    def __init__(self, config=None, device='cuda', use_renderer=False):
         super(DECA, self).__init__()
         if config is None:
             self.cfg = cfg
@@ -44,10 +44,9 @@ class DECA(nn.Module):
         self.uv_size = self.cfg.model.uv_size
 
         self._create_model(self.cfg.model)
-        #self._setup_renderer(self.cfg.model)
-        self._auxiliar_setup_render(self.cfg.model)
+        self._setup_renderer(self.cfg.model) if use_renderer else self._auxiliar_setup_render(self.cfg.model) # Added
 
-    def _auxiliar_setup_render(self, model_cfg):
+    def _auxiliar_setup_render(self, model_cfg): # Added
         image_size = self.image_size
         obj_filename = model_cfg.topology_path
         uv_size = 256 if model_cfg.uv_size is None else model_cfg.uv_size
@@ -296,26 +295,23 @@ class DECA(nn.Module):
         '''
         i = 0
         vertices = opdict['verts'][i].cpu().numpy()
-        faces = self.faces[0].cpu().numpy()
-        #faces = self.render.faces[0].cpu().numpy()
-        #texture = util.tensor2image(opdict['uv_texture_gt'][i])
-        uvcoords = self.raw_uvcoords[0].cpu().numpy()
-        #uvcoords = self.render.raw_uvcoords[0].cpu().numpy()
-        uvfaces = self.uvfaces[0].cpu().numpy()
-        #uvfaces = self.render.uvfaces[0].cpu().numpy()
+        faces = self.render.faces[0].cpu().numpy()
+        texture = util.tensor2image(opdict['uv_texture_gt'][i])
+        uvcoords = self.render.raw_uvcoords[0].cpu().numpy()
+        uvfaces = self.render.uvfaces[0].cpu().numpy()
         # save coarse mesh, with texture and normal map
-        #normal_map = util.tensor2image(opdict['uv_detail_normals'][i]*0.5 + 0.5)
-        #util.write_obj(filename, vertices, faces, texture=texture, uvcoords=uvcoords, uvfaces=uvfaces, normal_map=normal_map)
-        util.write_obj(filename, vertices, faces, uvcoords=uvcoords, uvfaces=uvfaces)
-        """
+        normal_map = util.tensor2image(opdict['uv_detail_normals'][i] * 0.5 + 0.5)
+        util.write_obj(filename, vertices, faces, texture=texture, uvcoords=uvcoords, uvfaces=uvfaces, normal_map=normal_map)
+
         # upsample mesh, save detailed mesh
-        #texture = texture[:,:,[2,1,0]]
+        texture = texture[:, :, [2, 1, 0]]
         normals = opdict['normals'][i].cpu().numpy()
-        displacement_map = opdict['displacement_map'][i].cpu().numpy().squeeze()
-        #dense_vertices, dense_colors, dense_faces = util.upsample_mesh(vertices, normals, faces, displacement_map, texture, self.dense_template)
-        #util.write_obj(filename.replace('.obj', '_detail.obj'), dense_vertices, dense_faces,colors = dense_colors,inverse_face_order=True)
-        util.write_obj(filename.replace('.obj', '_detail.obj'), vertices=vertices, faces=faces,inverse_face_order=True)
-        """
+        displacement_map = opdict['displacement_map'][i].cpu().detach().numpy().squeeze()
+        dense_vertices, dense_colors, dense_faces = util.upsample_mesh(vertices, normals, faces, displacement_map, texture, self.dense_template)
+        # util.write_obj(filename.replace('.obj', '_detailed1.obj'), dense_vertices, dense_faces,colors = dense_colors,inverse_face_order=True)
+        util.write_obj(filename.replace('.obj', '_detailed1.obj'), dense_vertices, dense_faces, inverse_face_order=True)
+        util.write_obj(filename.replace('.obj', '_detailed2.obj'), vertices=vertices, faces=faces, inverse_face_order=True)
+
 
     def run(self, imagepath, iscrop=True):
         ''' An api for running deca given an image path
