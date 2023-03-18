@@ -15,3 +15,4 @@ smplx_deca_main/smplx/smpl-models/models/flame/FLAME_NEUTRAL.pkl
 smplx_deca_main/smplx/smpl-models/models/flame/FLAME_MALE.pkl
 smplx_deca_main/smplx/smpl-models/models/flame/FLAME_FEMALE.pkl
 Demos/tensorboard/tensorboard_test
+smplx_deca_main/deca/data/FLAME_albedo_from_BFM.npz

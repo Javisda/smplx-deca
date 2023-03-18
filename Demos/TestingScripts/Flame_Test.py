@@ -6,7 +6,7 @@ class Struct(object):
 if __name__ == '__main__':
     import pickle
 
-    with open("D:\-DYDDV - URJC\SEDDI\smplx-deca-copia\smplx-deca\smplx_deca_main\deca\data\generic_model.pkl", "rb") as f:
+    with open("/home/javiserrano/Git/smplx-deca/smplx_deca_main/deca/data/generic_model.pkl", "rb") as f:
         ss = pickle.load(f, encoding='latin1')
         flame_model = Struct(**ss)
 
