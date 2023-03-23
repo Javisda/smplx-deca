@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import open3d as o3d
 import cv2
-import enum
+from torch.nn import Parameter
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from smplx_deca_main.deca.decalib.deca import DECA
@@ -84,6 +84,7 @@ def main(args):
     # Clear expresion and pose parameters from DECA generated head as it will help fitting the model better.
     id_codedict['exp'] = torch.zeros((1, 50))
     id_codedict['pose'] = torch.zeros((1, 6))
+    id_codedict['cam'] = torch.tensor((9.5878, 0.0057931, 0.024715), dtype=torch.float32)
     id_opdict, id_visdict = deca.decode(id_codedict)
     id_visdict = {x: id_visdict[x] for x in ['inputs', 'shape_detail_images']}
 
@@ -113,23 +114,75 @@ def main(args):
         generic_deca = pickle.load(f, encoding='latin1')
 
     deca_neutral_vertices = generic_deca['v_template']
+    deca_neutral_vertices = deca_neutral_vertices.astype(np.float32)
+
 
     # OFFSETS AMONG NEUTRAL DECA AND NEUTRAL SMPLX HEADS
     # Smpl is posed differently as deca, so first we align them.
-    smpl_neutral_head_vertices = smpl_body_template[head_idxs].numpy().copy()
-
+    smpl_neutral_head_vertices = smpl_body_template[head_idxs]
 
         # Find head gravity centers
-    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_body_template[head_idxs])
+    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_neutral_head_vertices)
     center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
 
-
         # Get head to head offsets (having gravity centers as reference)
-    smpl_base_to_deca_coords_offsets = center_of_gravity_smplx - center_of_gravity_deca_neutral
+    smpl_base_to_deca_coords_offsets = torch.sub(center_of_gravity_smplx, center_of_gravity_deca_neutral)
         # Having the offsets, translate the smplx head to align deca
-    smpl_neutral_aligned = torch.sub(torch.tensor(smpl_neutral_head_vertices), smpl_base_to_deca_coords_offsets)
+    smpl_aligned = torch.zeros_like(smpl_neutral_head_vertices, dtype=torch.float32)
+    smpl_aligned[:, 0] = smpl_neutral_head_vertices[:, 0] - smpl_base_to_deca_coords_offsets[0]
+    smpl_aligned[:, 1] = smpl_neutral_head_vertices[:, 1] - smpl_base_to_deca_coords_offsets[1]
+    smpl_aligned[:, 2] = smpl_neutral_head_vertices[:, 2] - smpl_base_to_deca_coords_offsets[2]
+        # Update gravity centers
+    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_aligned)
+    center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
+
+        # Visualize first alignment based on gravity center
+    visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+        # Better alignment raining loop
+    coords_to_optim = torch.tensor((center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2]))
+    coords_to_optim.requires_grad = True
+    lr1 = 0.00000001
+    optimizer1 = torch.optim.Adam([coords_to_optim], lr=lr1)
+    print("Init positions deca: {}, {}, {}", center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2])
+    print("Init positions smpl: {}, {}, {}", coords_to_optim[0], coords_to_optim[1], coords_to_optim[2])
+    best_current_loss = 9999999
+    best_head_alignment_checkpoint = torch.zeros_like(smpl_aligned)
+    max_iters_without_improvement = 20
+    current_iter_without_improvement = 0
+    max_iters = 1000
+    for epoch in range(0, max_iters):
+        optimizer1.zero_grad()
+
+        smpl_aligned[:, 0] -= coords_to_optim[0]
+        smpl_aligned[:, 1] -= coords_to_optim[1]
+        smpl_aligned[:, 2] -= coords_to_optim[2]
+
+        loss1 = (smpl_aligned - torch.tensor(deca_neutral_vertices)).pow(2).sum()
+        loss1.backward(retain_graph=True)
+        optimizer1.step()
+        print("Distance loss: " + str(loss1))
+
+        if loss1 < best_current_loss:
+            best_current_loss = loss1
+            best_head_alignment_checkpoint = smpl_aligned
+            current_iter_without_improvement = 0
+        else:
+            current_iter_without_improvement += 1
+
+        if current_iter_without_improvement == max_iters_without_improvement:
+            print("Best loss: " + str(loss1) + ". Iters run to optimizarion: " + str(epoch) + ".")
+            break
+
+    coords_to_optim.requires_grad = False
+
+    # Visualize first alignment based on gravity center
+    visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+
+
+    print("Last positions deca: {}, {}, {}", center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2])
+    print("Last positions smpl: {}, {}, {}", coords_to_optim[0], coords_to_optim[1], coords_to_optim[2])
         # After being aligned, calculate shape offsets among both faces
-    shape_offset_deca_and_smplx_neutrals = torch.sub(smpl_neutral_aligned, torch.tensor(deca_neutral_vertices))
+    shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment_checkpoint, torch.tensor(deca_neutral_vertices))
 
 
 
@@ -229,9 +282,9 @@ def main(args):
             checkpoint_error = best_error
         if debug_anomalies:
             with torch.autograd.detect_anomaly():
-                loss.backward()  # calculate derivatives
+                loss.backward(retain_graph=True)  # calculate derivatives
         else:
-            loss.backward()  # calculate derivatives
+            loss.backward(retain_graph=True)  # calculate derivatives
         optimizer.step()
 
         if save:
@@ -325,17 +378,37 @@ def main(args):
             save_path = 'TestSamples/' + save_type +'_' +image_name+'_exp'+name_exp+'.obj'
             if save_type == 'reconstruction':
                 save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
-                if show_meshes:
-                    show_mesh(smpl_vertices_no_expression, smpl_model, head_idxs, head_color)
+                visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             else:
                 save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
-                if show_meshes:
-                    show_mesh(smpl_vertices_expression, smpl_model, head_idxs, head_color)
+                visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             if os.path.exists(save_path):
                 print(f'Successfully saved {save_path}')
             else:
                 print(f'Error: Failed to save {save_path}')
 
+
+def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None, head_color=None):
+    if visualize is False or (len(mesh_vertices) != len(mesh_faces)):
+        return
+    complete_meshes = []
+    for i in range(len(mesh_vertices)):
+        if torch.is_tensor(mesh_vertices[i]) and mesh_vertices[i].requires_grad==True:
+            mesh_vertices[i] = mesh_vertices[i].detach().numpy()
+        mesh = o3d.geometry.TriangleMesh()
+        mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices[i])
+        mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[i])
+        mesh.compute_vertex_normals()
+
+        # Paint Head
+        if head_color is not None and head_idxs is not None:
+            colors = np.ones_like(mesh_vertices[i]) * [0.3, 0.3, 0.3]
+            colors[head_idxs] = head_color
+            mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+
+        complete_meshes.append(mesh)
+
+    o3d.visualization.draw_geometries(complete_meshes)
 
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
