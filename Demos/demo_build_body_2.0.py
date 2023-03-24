@@ -3,7 +3,6 @@ import os.path as osp
 import argparse
 import torch
 import numpy as np
-import open3d as o3d
 import cv2
 from torch.nn import Parameter
 
@@ -15,6 +14,8 @@ from smplx_deca_main.deca.decalib.utils import util
 
 import smplx_deca_main.smplx as smplx
 from smplx_deca_main.smplx.smplx import body_models as smplx
+
+import utils
 
 def main(args):
 
@@ -44,17 +45,17 @@ def main(args):
 
     # ------------ CREATE SMPLX MODEL ------------w
     # Body Translation
-    global_position = apply_global_translation(x=0.0, y=0.0, z=0.0)
+    global_position = utils.create_global_translation(x=0.0, y=0.0, z=0.0)
     # Body orientation
-    global_orient = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    global_orient = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
     # Body pose
     body_pose = torch.zeros([1, 63], dtype=torch.float32)
     # 1º joint left leg
-    # body_pose[0, :3] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, :3] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # 1º joint rigth leg
-    # body_pose[0, 3:6] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, 3:6] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
-    body_pose[0, 6:9] = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    body_pose[0, 6:9] = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
@@ -122,8 +123,8 @@ def main(args):
     smpl_neutral_head_vertices = smpl_body_template[head_idxs]
 
         # Find head gravity centers
-    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_neutral_head_vertices)
-    center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
+    center_of_gravity_smplx = utils.getMeshGravityCenter(mesh=smpl_neutral_head_vertices)
+    center_of_gravity_deca_neutral = utils.getMeshGravityCenter(mesh=deca_neutral_vertices)
 
         # Get head to head offsets (having gravity centers as reference)
     smpl_base_to_deca_coords_offsets = torch.sub(center_of_gravity_smplx, center_of_gravity_deca_neutral)
@@ -133,11 +134,11 @@ def main(args):
     smpl_aligned[:, 1] = smpl_neutral_head_vertices[:, 1] - smpl_base_to_deca_coords_offsets[1]
     smpl_aligned[:, 2] = smpl_neutral_head_vertices[:, 2] - smpl_base_to_deca_coords_offsets[2]
         # Update gravity centers
-    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_aligned)
-    center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
+    center_of_gravity_smplx = utils.getMeshGravityCenter(mesh=smpl_aligned)
+    center_of_gravity_deca_neutral = utils.getMeshGravityCenter(mesh=deca_neutral_vertices)
 
         # Visualize first alignment based on gravity center
-    visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+    utils.visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
         # Better alignment raining loop
     coords_to_optim = torch.tensor((center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2]))
     coords_to_optim.requires_grad = True
@@ -176,7 +177,7 @@ def main(args):
     coords_to_optim.requires_grad = False
 
     # Visualize first alignment based on gravity center
-    visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+    utils.visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
 
 
     print("Last positions deca: {}, {}, {}", center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2])
@@ -200,7 +201,7 @@ def main(args):
     selected_vertices = selected_vertices + normal_deca_offsets
     selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals # If next offsets are commented, final body won't have lips correction but will have better neck
         # Apply some optional transforms
-    selected_vertices = applyTransform(selected_vertices)
+    selected_vertices = utils.applyManualTransform(selected_vertices)
         # Replace vertices
     head_vertices_no_expression = selected_vertices
 
@@ -219,7 +220,7 @@ def main(args):
     selected_vertices = selected_vertices + exp_deca_offsets
     selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals  # If next offsets are commented, final body won't have lips correction but will have better neck
         # Apply some optional transforms
-    selected_vertices = applyTransform(selected_vertices)
+    selected_vertices = utils.applyManualTransform(selected_vertices)
         # Replace vertices
     head_vertices_expression = selected_vertices
 
@@ -307,7 +308,7 @@ def main(args):
     smpl_output = smpl_model(betas=best_betas, return_verts=True)
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
     body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
-    body_only_betas[head_idxs] = head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
+    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
@@ -324,7 +325,7 @@ def main(args):
     # GENERATE MODEL WITH EXPRESSION
         # First isn't necessary anymore as it would shape again the body and accumulate
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
-    body_only_betas[head_idxs] = head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
+    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
@@ -377,109 +378,28 @@ def main(args):
         if args.saveObj:
             save_path = 'TestSamples/' + save_type +'_' +image_name+'_exp'+name_exp+'.obj'
             if save_type == 'reconstruction':
-                save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
-                visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
+                utils.save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
+                utils.visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             else:
-                save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
-                visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
+                utils.save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
+                utils.visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             if os.path.exists(save_path):
                 print(f'Successfully saved {save_path}')
             else:
                 print(f'Error: Failed to save {save_path}')
 
 
-def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None, head_color=None):
-    if visualize is False or (len(mesh_vertices) != len(mesh_faces)):
-        return
-    complete_meshes = []
-    for i in range(len(mesh_vertices)):
-        if torch.is_tensor(mesh_vertices[i]) and mesh_vertices[i].requires_grad==True:
-            mesh_vertices[i] = mesh_vertices[i].detach().numpy()
-        mesh = o3d.geometry.TriangleMesh()
-        mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices[i])
-        mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[i])
-        mesh.compute_vertex_normals()
-
-        # Paint Head
-        if head_color is not None and head_idxs is not None:
-            colors = np.ones_like(mesh_vertices[i]) * [0.3, 0.3, 0.3]
-            colors[head_idxs] = head_color
-            mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-
-        complete_meshes.append(mesh)
-
-    o3d.visualization.draw_geometries(complete_meshes)
-
-def head_smoothing(deca_head, smplx_head, head_idx):
-    # Weight loading
-    abs_path = os.path.abspath('mask_1')
-    weights = np.fromfile(abs_path, 'float32')
-
-    # Calculations
-    head_weights = torch.tensor(weights[head_idx])
-    new_head = torch.zeros_like(deca_head)
-    for i in range (5023):
-        for j in range (3):
-            smpl_coord = smplx_head[i, j] * head_weights[i]
-            deca_coord = deca_head[i, j] * (1 - head_weights[i])
-            new_head[i, j] = smpl_coord + deca_coord
-
-    return new_head
-
-def getMeshGravityCenter(mesh):
-    if not torch.is_tensor(mesh):
-        mesh = torch.tensor(mesh)
-    summed_coords = torch.sum(mesh, dim=0)
-    gravity_center = torch.div(summed_coords, mesh.shape[0])
-    return gravity_center
-
-def show_mesh(vertices, model, head_idxs, head_color):
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(model.faces)
-    mesh.compute_vertex_normals()
-
-    colors = np.ones_like(vertices) * [0.3, 0.3, 0.3]
-    colors[head_idxs] = head_color
-
-    mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-
-    o3d.visualization.draw_geometries([mesh])
 
 
-def applyTransform(vertices):
-    # Apply manual transformations if desired
-    # Add offset to y coordinate
-    #vertices[:, 1] += 0.15
-    # Add offset to z coordinate
-    #vertices[head_idxs, 2] += 0.045
-    # Add scaling
-    #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 1.2
-    return vertices
 
-def save_obj(filename, vertices, faces):
-    vertices = vertices
-    faces = faces
-    from smplx_deca_main.smplx.smplx import utils
-    utils.write_obj(filename, vertices, faces)
-    print("Model Saved")
 
-def apply_rotation(x_degrees = 0, y_degrees=0, z_degrees=0):
-    global_orient = torch.zeros([1, 3], dtype=torch.float32)
-    global_orient[0, 0] = x_degrees
-    global_orient[0, 1] = y_degrees
-    global_orient[0, 2] = z_degrees
-    degrees_to_rads = 3.14159/180
-    global_orient *= degrees_to_rads
-    return global_orient
 
-def apply_global_translation(x = 0, y=0, z=0):
-    global_orient = torch.zeros([1, 3], dtype=torch.float32)
-    global_orient[0, 0] = x
-    global_orient[0, 1] = y
-    global_orient[0, 2] = z
-    return global_orient
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
