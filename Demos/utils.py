@@ -51,14 +51,6 @@ def save_obj(filename, vertices, faces):
     print("Model Saved")
 
 
-def getMeshGravityCenter(mesh):
-    if not torch.is_tensor(mesh):
-        mesh = torch.tensor(mesh)
-    summed_coords = torch.sum(mesh, dim=0)
-    gravity_center = torch.div(summed_coords, mesh.shape[0])
-    return gravity_center
-
-
 def applyManualTransform(vertices):
     # Apply manual transformations if desired
     # Add offset to y coordinate
@@ -87,3 +79,70 @@ def create_global_translation(x = 0, y = 0, z = 0):
     global_orient[0, 1] = y
     global_orient[0, 2] = z
     return global_orient
+
+
+def get_mesh_root(mesh):
+    if not torch.is_tensor(mesh):
+        mesh = torch.from_numpy(mesh)
+
+    # Compute the mean of the vertices in each dimension
+    root_x = torch.mean(mesh[:, 0])
+    root_y = torch.mean(mesh[:, 1])
+    root_z = torch.mean(mesh[:, 2])
+
+    # Create the tensor representing the root
+    root = torch.tensor([root_x, root_y, root_z])
+
+    return root
+def optimize_head_alignment2(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
+
+    if not torch.is_tensor(mesh1):
+        mesh1 = torch.from_numpy(mesh1)
+    if not torch.is_tensor(mesh2):
+        mesh2 = torch.from_numpy(mesh2)
+
+
+    # Get initial roots
+    root1 = get_mesh_root(mesh1)
+    root2 = get_mesh_root(mesh2)
+
+    # Create params to optimize
+    coords_to_optimize = torch.tensor([root1[0], root1[1], root1[2]], requires_grad=True)
+
+    # Create optimizer
+    optimizer = torch.optim.Adam([coords_to_optimize], lr=step_size)
+
+    # Optimization loop
+    best_loss = float("inf")
+    current_iter_without_improvement = 0
+    best_alignment_checkpoint = mesh1.clone()
+    for step in range(max_iters):
+        # Update mesh1 with new root
+        mesh1[:, 0] += coords_to_optimize[0] - root1[0]
+        mesh1[:, 1] += coords_to_optimize[1] - root1[1]
+        mesh1[:, 2] += coords_to_optimize[2] - root1[2]
+
+        # Calculate loss
+        loss = (mesh1 - mesh2).pow(2).sum()
+
+        # Backward and optimize
+        optimizer.zero_grad()
+        loss.backward(retain_graph=True)
+        optimizer.step()
+        print("Distance loss: " + str(loss))
+
+        # Update the best loss and mesh checkpoint if needed
+        if loss < best_loss:
+            best_loss = loss
+            best_alignment_checkpoint = mesh1.clone()
+            current_iter_without_improvement = 0
+        else:
+            current_iter_without_improvement += 1
+
+        # Check if optimization isn't improving for a number of steps
+        if current_iter_without_improvement == max_iters_without_improvement:
+            break
+
+    coords_to_optimize.requires_grad = False
+    # Return optimized mesh1
+    return best_alignment_checkpoint
