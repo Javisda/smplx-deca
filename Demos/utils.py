@@ -9,8 +9,12 @@ def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None,
         return
     complete_meshes = []
     for i in range(len(mesh_vertices)):
-        if torch.is_tensor(mesh_vertices[i]) and mesh_vertices[i].requires_grad==True:
-            mesh_vertices[i] = mesh_vertices[i].detach().numpy()
+        if torch.is_tensor(mesh_vertices[i]):
+            if mesh_vertices[i].shape[0] == 1:
+                mesh_vertices[i] = mesh_vertices[i].squeeze(dim=0)
+            if mesh_vertices[i].requires_grad==True:
+                mesh_vertices[i] = mesh_vertices[i].detach().numpy()
+
         mesh = o3d.geometry.TriangleMesh()
         mesh.vertices = o3d.utility.Vector3dVector(mesh_vertices[i])
         mesh.triangles = o3d.utility.Vector3iVector(mesh_faces[i])
@@ -94,7 +98,7 @@ def get_mesh_root(mesh):
     root = torch.tensor([root_x, root_y, root_z])
 
     return root
-def optimize_head_alignment2(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
+def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
 
     if not torch.is_tensor(mesh1):
         mesh1 = torch.from_numpy(mesh1)
@@ -141,8 +145,83 @@ def optimize_head_alignment2(mesh1, mesh2, step_size=0.00000001, max_iters=1000,
 
         # Check if optimization isn't improving for a number of steps
         if current_iter_without_improvement == max_iters_without_improvement:
+            print("Total iterations: " + str(step))
             break
 
     coords_to_optimize.requires_grad = False
     # Return optimized mesh1
     return best_alignment_checkpoint
+
+def learn_body_from_head(head_shape, smpl_model, head_idxs):
+    # 1º Get head shape to learn body from
+    head_shape = head_shape
+
+    # 2º Hyper-parameters
+    lr = 0.2
+    current_iters = 0
+    consecutive_iters_checkpoint = 20
+    shape = smpl_model.betas
+    shape.requires_grad = True
+    finished = False
+    debug_anomalies = False
+    optimizer = torch.optim.Adam([shape], lr=lr)
+    checkpoint_error = None
+    best_error = 1e20
+    max_iters = 1000
+    best_betas = torch.zeros(10, dtype=torch.float32)
+
+    # Tensorboard Initialization
+    from torch.utils.tensorboard import SummaryWriter
+    writer = SummaryWriter(f'tensorboard/tensorboard_test')
+    step = 0
+
+    # Optimization Loop
+    for epoch in range(0, max_iters):
+        save = False
+        current_iters += 1
+        optimizer.zero_grad()
+
+        # 3º Body generation with best found betas at the moment
+        smpl_training_output = smpl_model(betas=shape, return_verts=True)
+
+        # 4º Get SMPLX generated head
+        smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
+
+        # 5º Find head to head euclidean distance without sqrt (function loss)
+        loss = (head_shape - smpl_training_head[head_idxs]).pow(2).sum()
+
+        # 6º Calculate gradients, make a step in optimizer and early stoping in case of already found good betas
+        # print(f"Loss: {loss}")
+        if loss < 0.005:
+            finished = True
+
+        if best_error > loss.item():
+            save = True
+
+        best_error = min(best_error, loss.item())
+        if finished:
+            break
+
+        if epoch % consecutive_iters_checkpoint == 0:
+            if checkpoint_error is not None:
+                if best_error > checkpoint_error * 0.99:
+                    break
+            checkpoint_error = best_error
+        if debug_anomalies:
+            with torch.autograd.detect_anomaly():
+                loss.backward(retain_graph=True)  # calculate derivatives
+        else:
+            loss.backward(retain_graph=True)  # calculate derivatives
+        optimizer.step()
+
+        if save:
+            best_betas = shape
+
+        # Tensorboard writing
+        writer.add_scalar('Training loss', loss, global_step=step)
+        step += 1
+
+    print("Best Betas: ", [beta.item() for beta in best_betas[0]])
+    print("Mejor loss: {}", best_error)
+
+    return best_betas
