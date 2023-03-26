@@ -58,14 +58,24 @@ def main(args):
     body_pose[0, 6:9] = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
-    smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
+    smpl_betas = torch.tensor([ 0.3776465356349945,
+                              -1.1383668184280396,
+                               3.765796422958374,
+                              -3.6816511154174805,
+                              -1.0226212739944458,
+                              -3.976848602294922,
+                              -4.116629123687744,
+                               1.602636456489563,
+                              -1.5878002643585205,
+                              -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
     smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
 
     smpl_model = smplx.create(model_folder, model_type='smplx',
                          gender=gender,
                          ext=ext)
+    smpl_training_output = smpl_model(betas=smpl_betas, return_verts=True)
 
-    smpl_body_template = smpl_model.v_template
+    smpl_body_template = smpl_training_output['v_shaped'].squeeze(dim=0)
 
     # ------------ CREATE DECA MODEL ------------
     deca_cfg.model.extract_tex = args.extractTex
@@ -73,10 +83,10 @@ def main(args):
     deca_cfg.rasterizer_type = args.rasterizer_type
     deca = DECA(config=deca_cfg, device=device, use_renderer=use_renderer)
     # identity reference
-    i = 0
-    name = testdata[i]['imagename']
-    name_exp = expdata[i]['imagename']
-    images = testdata[i]['image'].to(device)[None, ...]
+    id = 0
+    name = testdata[id]['imagename']
+    name_exp = expdata[id]['imagename']
+    images = testdata[id]['image'].to(device)[None, ...]
 
     # ------------ RUN DECA TO GENERATE HEAD MODELS ------------
     # Get dict to generate no expression head model
@@ -92,7 +102,7 @@ def main(args):
     # Get dict to generate expression head model
     # -- expression transfer
     # exp code from image
-    exp_images = expdata[i]['image'].to(device)[None, ...]
+    exp_images = expdata[id]['image'].to(device)[None, ...]
     with torch.no_grad():
         exp_codedict = deca.encode(exp_images)
 
@@ -110,22 +120,65 @@ def main(args):
 
 
     # ------------ CALCULATE HEAD VERTICES BASED ON OFFSETS WITH MULTIPLE MODELS ------------
+    path_to_neutral_deca = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')),
+                                        'smplx-deca', 'smplx_deca_main', 'deca', 'data', 'generic_model.pkl')
     import pickle
-    with open("/home/javiserrano/Git/smplx-deca/smplx_deca_main/deca/data/generic_model.pkl", "rb") as f:
+    with open(path_to_neutral_deca, "rb") as f:
         generic_deca = pickle.load(f, encoding='latin1')
 
     deca_neutral_vertices = generic_deca['v_template']
     deca_neutral_vertices = deca_neutral_vertices.astype(np.float32)
 
 
+    # TESTING automatize alignments
+
+    generated_deca_head = id_opdict['verts'].detach().clone()
+    deca_neutral_head = deca_neutral_vertices
+    smplx_neutral_head = smpl_model.v_template[head_idxs]
+    generated_smplx_head = smpl_body_template[head_idxs]
+    heads_to_align = [generated_deca_head, deca_neutral_head, smplx_neutral_head, generated_smplx_head]
+    total_offset = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
+    for i in range(len(heads_to_align) - 1):
+        head_1 = heads_to_align[i]
+        head_2 = heads_to_align[i + 1]
+
+        # Find head gravity centers
+        gravity_center_1 = utils.get_mesh_root(mesh=head_1)
+        gravity_center_2 = utils.get_mesh_root(mesh=head_2)
+
+        # Get root to root offsets (having gravity centers as reference)
+        root_to_root_offsets = torch.sub(gravity_center_1, gravity_center_2)
+
+        # Having the offsets, make an initial guess of alignment
+        if not torch.is_tensor(head_1):
+            head_1 = torch.from_numpy(head_1)
+        head_1_aligned = head_1 - root_to_root_offsets
+
+        # Visualize first alignment based on gravity center
+        utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
+                               visualize=show_meshes)
+
+        # Better alignment raining loop
+        best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=1)
+
+        # Visualize second alignment after optimization
+        utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
+                               visualize=show_meshes)
+
+        # After optimization, calculate shape offsets among both faces
+        shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment,
+                                                         torch.tensor(head_2))
+
+        # Accumulate offset
+        total_offset = total_offset + shape_offset_deca_and_smplx_neutrals.squeeze(0)
+
+    """
     # OFFSETS AMONG NEUTRAL DECA AND NEUTRAL SMPLX HEADS
     # Smpl is posed differently as deca, so first we align them.
     smpl_neutral_head_vertices = smpl_body_template[head_idxs]
-
         # Find head gravity centers
     center_of_gravity_smplx = utils.get_mesh_root(mesh=smpl_neutral_head_vertices)
     center_of_gravity_deca_neutral = utils.get_mesh_root(mesh=deca_neutral_vertices)
-
         # Get head to head offsets (having gravity centers as reference)
     smpl_base_to_deca_coords_offsets = torch.sub(center_of_gravity_smplx, center_of_gravity_deca_neutral)
         # Having the offsets, make an initial guess of alignment
@@ -133,14 +186,12 @@ def main(args):
         # Visualize first alignment based on gravity center
     utils.visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
         # Better alignment raining loop
-    best_head_alignment_checkpoint = utils.optimize_head_alignment2(smpl_aligned, deca_neutral_vertices)
+    best_head_alignment_checkpoint = utils.optimize_head_alignment(smpl_aligned, deca_neutral_vertices)
     # Visualize first alignment based on gravity center
     utils.visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
-
-
         # After being aligned, calculate shape offsets among both faces
     shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment_checkpoint, torch.tensor(deca_neutral_vertices))
-
+    """
 
 
     # NORMAL HEAD (NO EXPRESSION)
@@ -148,14 +199,16 @@ def main(args):
 
         # 2º offsets deca generated mesh and deca neutral
     neutral_vertices = generic_deca['v_template']
-    normal_deca_offsets = id_opdict['verts'] - neutral_vertices
+    best_head_alignment_checkpoint = utils.optimize_head_alignment(id_opdict['verts'].detach().clone(), neutral_vertices)
+    normal_deca_offsets = torch.sub(best_head_alignment_checkpoint, torch.tensor(neutral_vertices))
     normal_deca_offsets = normal_deca_offsets.squeeze(0)
 
         # 3º Add to full body
     selected_vertices = normal_body_vertices[head_idxs, :]
         # Add offsets
-    selected_vertices = selected_vertices + normal_deca_offsets
-    selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals # If next offsets are commented, final body won't have lips correction but will have better neck
+    selected_vertices += total_offset
+    #selected_vertices = selected_vertices + normal_deca_offsets
+    #selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals # If next offsets are commented, final body won't have lips correction but will have better neck
         # Apply some optional transforms
     selected_vertices = utils.applyManualTransform(selected_vertices)
         # Replace vertices
@@ -181,81 +234,8 @@ def main(args):
     head_vertices_expression = selected_vertices
 
 
-    # BODY FITTING
-    # 1º Get DECA generated head to approximate body
-    deca_head_copy = head_vertices_no_expression
-    # 2º Hyper-parameters
-    lr = 0.2
-    current_iters = 0
-    consecutive_iters_checkpoint = 20
-    shape = smpl_model.betas
-    shape.requires_grad = True
-    finished = False
-    debug_anomalies = False
-    optimizer = torch.optim.Adam([shape], lr=lr)
-    checkpoint_error = None
-    best_error = 1e20
-    max_iters = 1000
-    best_betas = torch.zeros(10, dtype=torch.float32)
-    # body_template_smplx = smpl_model.v_template.clone()
-
-    # Tensorboard Initialization
-    from torch.utils.tensorboard import SummaryWriter
-    writer = SummaryWriter(f'tensorboard/tensorboard_test')
-    step = 0
-
-    # Optimization Loop
-    for epoch in range(0, max_iters):
-        save = False
-        current_iters += 1
-        optimizer.zero_grad()
-
-        # 3º Body generation with best found betas at the moment
-        #smpl_model.v_template = body_template_smplx # Reestablecer malla del modelo para que no se acumulen las betas
-        smpl_training_output = smpl_model(betas=shape, return_verts=True)
-
-        # 4º Get SMPLX generated head
-        smpl_training_head = smpl_training_output['v_shaped'].squeeze(dim=0)
-
-        # 5º Find head to head euclidean distance without sqrt (function loss)
-        loss = (deca_head_copy - smpl_training_head[head_idxs]).pow(2).sum()
-
-        # 6º Calculate gradients, make a step in optimizer and early stoping in case of already found good betas
-        # print(f"Loss: {loss}")
-        if loss < 0.005:
-            finished = True
-
-        if best_error > loss.item():
-            save = True
-
-        best_error = min(best_error, loss.item())
-        if finished:
-            break
-
-        if epoch % consecutive_iters_checkpoint == 0:
-            if checkpoint_error is not None:
-                if best_error > checkpoint_error * 0.99:
-                    break
-            checkpoint_error = best_error
-        if debug_anomalies:
-            with torch.autograd.detect_anomaly():
-                loss.backward(retain_graph=True)  # calculate derivatives
-        else:
-            loss.backward(retain_graph=True)  # calculate derivatives
-        optimizer.step()
-
-        if save:
-            best_betas = shape
-
-
-        # Tensorboard writing
-        writer.add_scalar('Training loss', loss, global_step=step)
-        step += 1
-
-    print("Best Betas: ", [beta.item() for beta in best_betas[0]])
-    print("Mejor loss: {}", best_error)
-
-
+    # LEARN BODY
+    best_betas = utils.learn_body_from_head(head_vertices_no_expression, smpl_model, head_idxs)
 
 
     # --------------------- BODY MODEL GENERATION ---------------------
