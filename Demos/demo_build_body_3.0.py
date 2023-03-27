@@ -28,7 +28,6 @@ def main(args):
     corr_fname = args.corr_fname
     gender = args.gender
     ext = args.ext
-    head = args.head
     head_color = args.head_color
 
     # Load smplx-deca head correspondencies
@@ -112,12 +111,13 @@ def main(args):
     id_codedict['exp'] = exp_codedict['exp']
     transfer_opdict, transfer_visdict = deca.decode(id_codedict)
     id_visdict['transferred_shape'] = transfer_visdict['shape_detail_images']
-    cv2.imwrite(os.path.join(savefolder, name + '_animation.jpg'), deca.visualize(id_visdict))
+    os.makedirs(os.path.join(savefolder, name, 'images'), exist_ok=True)
+    cv2.imwrite(os.path.join(savefolder, name, 'images/animation.jpg'), deca.visualize(id_visdict))
 
     transfer_opdict['uv_texture_gt'] = id_opdict['uv_texture_gt']
     if args.saveDepth or args.saveKpt or args.saveObj or args.saveMat or args.saveImages:
-        os.makedirs(os.path.join(savefolder, name, 'reconstruction'), exist_ok=True)
-        os.makedirs(os.path.join(savefolder, name, 'animation'), exist_ok=True)
+        os.makedirs(os.path.join(savefolder, name, 'deca_head/reconstruction'), exist_ok=True)
+        os.makedirs(os.path.join(savefolder, name, 'deca_head/animation'), exist_ok=True)
 
 
     # ------------ CALCULATE HEAD VERTICES BASED ON OFFSETS WITH MULTIPLE HEAD MODELS ------------
@@ -245,7 +245,6 @@ def main(args):
 
 
     # --------------------------- SAVE MODELS ---------------------------
-    image_name = name
     for save_type in ['reconstruction', 'animation']:
 
         # Save DECA head
@@ -259,11 +258,8 @@ def main(args):
             depth_image = deca.render.render_depth(opdict['trans_verts']).repeat(1, 3, 1, 1)
             visdict['depth_images'] = depth_image
             cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_depth.jpg'), util.tensor2image(depth_image[0]))
-        if args.saveKpt:
-            np.savetxt(os.path.join(savefolder, name, save_type, name + '_kpt2d.txt'), opdict['landmarks2d'][0].cpu().numpy())
-            np.savetxt(os.path.join(savefolder, name, save_type, name + '_kpt3d.txt'), opdict['landmarks3d'][0].cpu().numpy())
         if args.saveObj:
-            deca.save_obj(os.path.join(savefolder, name, save_type, name + '.obj'), opdict)
+            deca.save_obj(os.path.join(savefolder, name + '/deca_head', save_type, name + '.obj'), opdict)
         if args.saveMat:
             opdict = util.dict_tensor2npy(opdict)
             from scipy.io import savemat
@@ -272,13 +268,13 @@ def main(args):
             for vis_name in ['inputs', 'rendered_images', 'albedo_images', 'shape_images', 'shape_detail_images']:
                 if vis_name not in visdict.keys():
                     continue
-                image = util.tensor2image(visdict[vis_name][0])
                 cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_' + vis_name + '.jpg'), util.tensor2image(visdict[vis_name][0]))
         # -----------------------------------------------------
 
         # Full body model saving
         if args.saveObj:
-            save_path = 'TestSamples/' + save_type +'_' +image_name+'_exp'+name_exp+'.obj'
+            os.makedirs(os.path.join(savefolder, name, 'body_models'), exist_ok=True)
+            save_path = os.path.join(savefolder, name + '/body_models/' + save_type +'_exp'+name_exp+'.obj')
             if save_type == 'reconstruction':
                 utils.save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
                 utils.visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
@@ -295,15 +291,6 @@ def main(args):
 
 
 
-
-
-
-
-
-
-
-
-
 if __name__ == '__main__':
     # DECA RELATIVE
     parser = argparse.ArgumentParser(description='DECA: Detailed Expression Capture and Animation')
@@ -312,8 +299,6 @@ if __name__ == '__main__':
                         help='path to input image')
     parser.add_argument('-e', '--exp_path', default='TestSamples/exp/7.jpg', type=str,
                         help='path to expression')
-    parser.add_argument('-s', '--savefolder', default='TestSamples/deca_head', type=str,
-                        help='path to the output directory, where results(obj, txt files) will be stored.')
     parser.add_argument('--device', default='cuda', type=str,
                         help='set device, cpu for using cpu')
     # rendering option
@@ -359,5 +344,10 @@ if __name__ == '__main__':
     parser.add_argument('--head-color', type=float, nargs=3, dest='head_color',
                         default=(0.3, 0.3, 0.6),
                         help='Color for the head vertices')
+
+    # SAVE GENERATED DOCUMENTS RELATIVE
+    parser.add_argument('-s', '--savefolder', default='TestSamples', type=str,
+                        help='path to the output directory, where results(obj, txt files) will be stored.')
+
 
     main(parser.parse_args())
