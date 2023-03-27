@@ -22,6 +22,7 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
+    learn_body = False
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -73,9 +74,9 @@ def main(args):
     smpl_model = smplx.create(model_folder, model_type='smplx',
                          gender=gender,
                          ext=ext)
-    smpl_training_output = smpl_model(betas=smpl_betas, return_verts=True)
+    smpl_output = smpl_model(betas=smpl_betas, return_verts=True)
 
-    smpl_body_template = smpl_training_output['v_shaped'].squeeze(dim=0)
+    smpl_body_generated = smpl_output['v_shaped'].squeeze(dim=0)
 
     # ------------ CREATE DECA MODEL ------------
     deca_cfg.model.extract_tex = args.extractTex
@@ -119,7 +120,7 @@ def main(args):
         os.makedirs(os.path.join(savefolder, name, 'animation'), exist_ok=True)
 
 
-    # ------------ CALCULATE HEAD VERTICES BASED ON OFFSETS WITH MULTIPLE MODELS ------------
+    # ------------ CALCULATE HEAD VERTICES BASED ON OFFSETS WITH MULTIPLE HEAD MODELS ------------
     path_to_neutral_deca = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')),
                                         'smplx-deca', 'smplx_deca_main', 'deca', 'data', 'generic_model.pkl')
     import pickle
@@ -130,14 +131,15 @@ def main(args):
     deca_neutral_vertices = deca_neutral_vertices.astype(np.float32)
 
 
-    # TESTING automatize alignments
-
-    generated_deca_head = id_opdict['verts'].detach().clone()
+    # 1º Calculate offsets between pairs of heads
+    generated_deca_head_no_expression = id_opdict['verts'].detach().clone()
+    generated_deca_head_expression = transfer_opdict['verts'].detach().clone()
     deca_neutral_head = deca_neutral_vertices
     smplx_neutral_head = smpl_model.v_template[head_idxs]
-    generated_smplx_head = smpl_body_template[head_idxs]
-    heads_to_align = [generated_deca_head, deca_neutral_head, smplx_neutral_head, generated_smplx_head]
-    total_offset = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
+    generated_smplx_head = smpl_body_generated[head_idxs]
+    heads_to_align = [generated_deca_head_expression, generated_deca_head_no_expression, deca_neutral_head, smplx_neutral_head, generated_smplx_head]
+    total_offset_no_expression = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
+    total_offset_expression = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
     for i in range(len(heads_to_align) - 1):
         head_1 = heads_to_align[i]
         head_2 = heads_to_align[i + 1]
@@ -156,97 +158,63 @@ def main(args):
 
         # Visualize first alignment based on gravity center
         utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
-                               visualize=show_meshes)
+                               visualize=False)
 
         # Better alignment raining loop
-        best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=1)
+        best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2)
 
         # Visualize second alignment after optimization
         utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
-                               visualize=show_meshes)
+                               visualize=False)
 
         # After optimization, calculate shape offsets among both faces
         shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment,
                                                          torch.tensor(head_2))
 
         # Accumulate offset
-        total_offset = total_offset + shape_offset_deca_and_smplx_neutrals.squeeze(0)
-
-    """
-    # OFFSETS AMONG NEUTRAL DECA AND NEUTRAL SMPLX HEADS
-    # Smpl is posed differently as deca, so first we align them.
-    smpl_neutral_head_vertices = smpl_body_template[head_idxs]
-        # Find head gravity centers
-    center_of_gravity_smplx = utils.get_mesh_root(mesh=smpl_neutral_head_vertices)
-    center_of_gravity_deca_neutral = utils.get_mesh_root(mesh=deca_neutral_vertices)
-        # Get head to head offsets (having gravity centers as reference)
-    smpl_base_to_deca_coords_offsets = torch.sub(center_of_gravity_smplx, center_of_gravity_deca_neutral)
-        # Having the offsets, make an initial guess of alignment
-    smpl_aligned = smpl_neutral_head_vertices - smpl_base_to_deca_coords_offsets
-        # Visualize first alignment based on gravity center
-    utils.visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
-        # Better alignment raining loop
-    best_head_alignment_checkpoint = utils.optimize_head_alignment(smpl_aligned, deca_neutral_vertices)
-    # Visualize first alignment based on gravity center
-    utils.visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
-        # After being aligned, calculate shape offsets among both faces
-    shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment_checkpoint, torch.tensor(deca_neutral_vertices))
-    """
+        if i == 0:
+            total_offset_expression += shape_offset_deca_and_smplx_neutrals.squeeze(0)
+        else:
+            total_offset_expression += shape_offset_deca_and_smplx_neutrals.squeeze(0)
+            total_offset_no_expression += shape_offset_deca_and_smplx_neutrals.squeeze(0)
 
 
     # NORMAL HEAD (NO EXPRESSION)
-    normal_body_vertices = smpl_body_template
-
-        # 2º offsets deca generated mesh and deca neutral
-    neutral_vertices = generic_deca['v_template']
-    best_head_alignment_checkpoint = utils.optimize_head_alignment(id_opdict['verts'].detach().clone(), neutral_vertices)
-    normal_deca_offsets = torch.sub(best_head_alignment_checkpoint, torch.tensor(neutral_vertices))
-    normal_deca_offsets = normal_deca_offsets.squeeze(0)
-
-        # 3º Add to full body
-    selected_vertices = normal_body_vertices[head_idxs, :]
-        # Add offsets
-    selected_vertices += total_offset
-    #selected_vertices = selected_vertices + normal_deca_offsets
-    #selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals # If next offsets are commented, final body won't have lips correction but will have better neck
-        # Apply some optional transforms
-    selected_vertices = utils.applyManualTransform(selected_vertices)
-        # Replace vertices
-    head_vertices_no_expression = selected_vertices
+        # 2º Select smplx shape
+    normal_body_vertices = smpl_body_generated
+        # 3º Select smplx head shape
+    smplx_head = normal_body_vertices[head_idxs, :]
+        # 4º Add offsets to smplx head
+    smplx_head_with_offsets = smplx_head + total_offset_no_expression
+        # 5º Replace vertices
+    head_vertices_no_expression = smplx_head_with_offsets
 
 
     # EXPRESSION BODY
-    expression_body_vertices = smpl_body_template
-
-        # 2º offsets deca generated mesh and deca neutral
-    neutral_vertices = generic_deca['v_template']
-    exp_deca_offsets = transfer_opdict['verts'] - neutral_vertices
-    exp_deca_offsets = exp_deca_offsets.squeeze(0)
-
-        # 3º Add to full body
-    selected_vertices = expression_body_vertices[head_idxs, :]
-    # Add offsets
-    selected_vertices = selected_vertices + exp_deca_offsets
-    selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals  # If next offsets are commented, final body won't have lips correction but will have better neck
-        # Apply some optional transforms
-    selected_vertices = utils.applyManualTransform(selected_vertices)
-        # Replace vertices
-    head_vertices_expression = selected_vertices
+        # 2º Select smplx shape
+    expression_body_vertices = smpl_body_generated
+        # 3º Select smplx head shape
+    smplx_head = expression_body_vertices[head_idxs, :]
+        # 4º Add offsets to smplx head
+    smplx_head_with_offsets = smplx_head + total_offset_expression
+        # 5º Replace vertices
+    head_vertices_expression = smplx_head_with_offsets
 
 
-    # LEARN BODY
-    best_betas = utils.learn_body_from_head(head_vertices_no_expression, smpl_model, head_idxs)
+    # LEARN BODY FROM HEAD SHAPE
+    if learn_body:
+        best_betas = utils.learn_body_from_head(head_vertices_no_expression, smpl_model, head_idxs)
+        # Do a forward pass through the model to get body shape
+        smpl_output = smpl_model(betas=best_betas, return_verts=True)
 
 
     # --------------------- BODY MODEL GENERATION ---------------------
     # GENERATE MODEL WITHOUT EXPRESSION
-        # First do a forward pass through the model to get body shape
-    smpl_output = smpl_model(betas=best_betas, return_verts=True)
-        # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
-    body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
-    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
-    smpl_model.v_template = body_only_betas
-        # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
+        # 1º Replace smplx head for deca head and smooth neck.
+    smplx_body = smpl_output['v_shaped'].squeeze(dim=0)
+    smplx_body[head_idxs] = utils.head_smoothing(head_vertices_no_expression.float(), smplx_body[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
+    smpl_model.v_template = smplx_body
+        # 2º Do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
     smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
                    global_orient=global_orient,
@@ -257,13 +225,11 @@ def main(args):
     smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
 
 
-
     # GENERATE MODEL WITH EXPRESSION
-        # First isn't necessary anymore as it would shape again the body and accumulate
-        # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
-    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
-    smpl_model.v_template = body_only_betas
-        # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
+         # 1º Replace smplx head for deca head and smooth neck.
+    smplx_body[head_idxs] = utils.head_smoothing(head_vertices_expression.float(), smplx_body[head_idxs], head_idx=head_idxs)
+    smpl_model.v_template = smplx_body
+        # 2º Do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
                    global_orient=global_orient,
                    body_pose=body_pose,

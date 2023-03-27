@@ -98,7 +98,7 @@ def get_mesh_root(mesh):
     root = torch.tensor([root_x, root_y, root_z])
 
     return root
-def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
+def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=100, max_iters_without_improvement=20):
 
     if not torch.is_tensor(mesh1):
         mesh1 = torch.from_numpy(mesh1)
