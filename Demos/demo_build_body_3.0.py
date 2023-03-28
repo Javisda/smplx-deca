@@ -26,7 +26,6 @@ def main(args):
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
-    gender = args.gender
     ext = args.ext
     head_color = args.head_color
 
@@ -38,16 +37,20 @@ def main(args):
     device = args.device
     os.makedirs(savefolder, exist_ok=True)
 
+    absolute_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
     # Select identity images
-    identity_1 = '/home/javiserrano/Git/smplx-deca/decaTestSamples/examples/IMG_0392_inputs.jpg'
-    identity_2 = '/home/javiserrano/Git/smplx-deca/decaTestSamples/examples/5.jpg'
+    identity_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'examples')
+    identity_1 = os.path.join(identity_path, 'IMG_0392_inputs.jpg')
+    identity_2 = os.path.join(identity_path, '5.jpg')
     identities = []
     identities.append(identity_1)
     identities.append(identity_2)
 
     # Select expression images
-    expression_1 = '/home/javiserrano/Git/smplx-deca/decaTestSamples/exp/7.jpg'
-    expression_2 = '/home/javiserrano/Git/smplx-deca/decaTestSamples/exp/0.jpg'
+    expression_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'exp')
+    expression_1 = os.path.join(expression_path, '7.jpg')
+    expression_2 = os.path.join(expression_path, '0.jpg')
     expressions = []
     expressions.append(expression_1)
     expressions.append(expression_2)
@@ -80,7 +83,7 @@ def main(args):
         identity_path = identities[j]
         expression_path = expressions[j]
         body_shape_parameters = body_shapes[j]
-        args.gender = genders[j]
+        gender = genders[j]
 
         # load test images
         testdata = datasets.TestData(identity_path, iscrop=args.iscrop, face_detector=args.detector)
