@@ -23,6 +23,7 @@ def main(args):
     show_meshes = True
     use_renderer = True
     learn_body = False
+    select_body_manually = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -45,7 +46,7 @@ def main(args):
     identity_2 = os.path.join(identity_path, '5.jpg')
     identities = []
     identities.append(identity_1)
-    identities.append(identity_2)
+    #identities.append(identity_2)
 
     # Select expression images
     expression_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'exp')
@@ -77,6 +78,13 @@ def main(args):
     genders = []
     genders.append(gender_1)
     genders.append(gender_2)
+
+    if select_body_manually:
+        import run_ui
+        body_shapes, expression = run_ui.run_ui()
+        for idx in range(len(genders)):
+            genders[idx] = 'neutral'
+
 
     for j in range(len(identities)):
 
