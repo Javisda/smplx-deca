@@ -3,22 +3,25 @@ import os.path as osp
 import argparse
 import torch
 import numpy as np
-import open3d as o3d
-import enum
+import cv2
+from torch.nn import Parameter
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from smplx_deca_main.deca.decalib.deca import DECA
 from smplx_deca_main.deca.decalib.datasets import datasets
 from smplx_deca_main.deca.decalib.utils.config import cfg as deca_cfg
+from smplx_deca_main.deca.decalib.utils import util
 
 import smplx_deca_main.smplx as smplx
 from smplx_deca_main.smplx.smplx import body_models as smplx
+
+import utils
 
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
-    use_renderer = False
+    use_renderer = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -42,17 +45,17 @@ def main(args):
 
     # ------------ CREATE SMPLX MODEL ------------w
     # Body Translation
-    global_position = apply_global_translation(x=0.0, y=0.0, z=0.0)
+    global_position = utils.create_global_translation(x=0.0, y=0.0, z=0.0)
     # Body orientation
-    global_orient = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    global_orient = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
     # Body pose
     body_pose = torch.zeros([1, 63], dtype=torch.float32)
     # 1º joint left leg
-    # body_pose[0, :3] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, :3] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # 1º joint rigth leg
-    # body_pose[0, 3:6] = apply_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
+    # body_pose[0, 3:6] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
     # pelvis
-    body_pose[0, 6:9] = apply_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    body_pose[0, 6:9] = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     # Build Body Shape and Face Expression Coefficients
     smpl_betas = torch.zeros([1, 10], dtype=torch.float32)
@@ -65,6 +68,7 @@ def main(args):
     smpl_body_template = smpl_model.v_template
 
     # ------------ CREATE DECA MODEL ------------
+    deca_cfg.model.extract_tex = args.extractTex
     deca_cfg.model.use_tex = args.useTex
     deca_cfg.rasterizer_type = args.rasterizer_type
     deca = DECA(config=deca_cfg, device=device, use_renderer=use_renderer)
@@ -78,7 +82,12 @@ def main(args):
     # Get dict to generate no expression head model
     with torch.no_grad():
         id_codedict = deca.encode(images)
-    id_opdict = deca.decode(id_codedict, rendering=False, vis_lmk=False, use_detail=False, return_vis=False)
+    # Clear expresion and pose parameters from DECA generated head as it will help fitting the model better.
+    id_codedict['exp'] = torch.zeros((1, 50))
+    id_codedict['pose'] = torch.zeros((1, 6))
+    id_codedict['cam'] = torch.tensor((9.5878, 0.0057931, 0.024715), dtype=torch.float32)
+    id_opdict, id_visdict = deca.decode(id_codedict)
+    id_visdict = {x: id_visdict[x] for x in ['inputs', 'shape_detail_images']}
 
     # Get dict to generate expression head model
     # -- expression transfer
@@ -90,32 +99,91 @@ def main(args):
     # transfer exp code
     id_codedict['pose'][:, 3:] = exp_codedict['pose'][:, 3:]
     id_codedict['exp'] = exp_codedict['exp']
-    transfer_opdict = deca.decode(id_codedict, rendering=False, vis_lmk=False, use_detail=False, return_vis=False)
+    transfer_opdict, transfer_visdict = deca.decode(id_codedict)
+    id_visdict['transferred_shape'] = transfer_visdict['shape_detail_images']
+    cv2.imwrite(os.path.join(savefolder, name + '_animation.jpg'), deca.visualize(id_visdict))
+
+    transfer_opdict['uv_texture_gt'] = id_opdict['uv_texture_gt']
+    if args.saveDepth or args.saveKpt or args.saveObj or args.saveMat or args.saveImages:
+        os.makedirs(os.path.join(savefolder, name, 'reconstruction'), exist_ok=True)
+        os.makedirs(os.path.join(savefolder, name, 'animation'), exist_ok=True)
 
 
     # ------------ CALCULATE HEAD VERTICES BASED ON OFFSETS WITH MULTIPLE MODELS ------------
     import pickle
-    with open("/home/javiserrano/Git/smplx-deca/smplx_deca_main/deca/data/generic_model.pkl", "rb") as f:
+    with open("/smplx_deca_main/deca/data/generic_model.pkl", "rb") as f:
         generic_deca = pickle.load(f, encoding='latin1')
 
     deca_neutral_vertices = generic_deca['v_template']
+    deca_neutral_vertices = deca_neutral_vertices.astype(np.float32)
+
 
     # OFFSETS AMONG NEUTRAL DECA AND NEUTRAL SMPLX HEADS
     # Smpl is posed differently as deca, so first we align them.
-    smpl_neutral_head_vertices = smpl_body_template[head_idxs].numpy().copy()
-
+    smpl_neutral_head_vertices = smpl_body_template[head_idxs]
 
         # Find head gravity centers
-    center_of_gravity_smplx = getMeshGravityCenter(mesh=smpl_body_template[head_idxs])
-    center_of_gravity_deca_neutral = getMeshGravityCenter(mesh=deca_neutral_vertices)
-
+    center_of_gravity_smplx = utils.getMeshGravityCenter(mesh=smpl_neutral_head_vertices)
+    center_of_gravity_deca_neutral = utils.getMeshGravityCenter(mesh=deca_neutral_vertices)
 
         # Get head to head offsets (having gravity centers as reference)
-    smpl_base_to_deca_coords_offsets = center_of_gravity_smplx - center_of_gravity_deca_neutral
+    smpl_base_to_deca_coords_offsets = torch.sub(center_of_gravity_smplx, center_of_gravity_deca_neutral)
         # Having the offsets, translate the smplx head to align deca
-    smpl_neutral_aligned = torch.sub(torch.tensor(smpl_neutral_head_vertices), smpl_base_to_deca_coords_offsets)
+    smpl_aligned = torch.zeros_like(smpl_neutral_head_vertices, dtype=torch.float32)
+    smpl_aligned[:, 0] = smpl_neutral_head_vertices[:, 0] - smpl_base_to_deca_coords_offsets[0]
+    smpl_aligned[:, 1] = smpl_neutral_head_vertices[:, 1] - smpl_base_to_deca_coords_offsets[1]
+    smpl_aligned[:, 2] = smpl_neutral_head_vertices[:, 2] - smpl_base_to_deca_coords_offsets[2]
+        # Update gravity centers
+    center_of_gravity_smplx = utils.getMeshGravityCenter(mesh=smpl_aligned)
+    center_of_gravity_deca_neutral = utils.getMeshGravityCenter(mesh=deca_neutral_vertices)
+
+        # Visualize first alignment based on gravity center
+    utils.visualize_meshes([deca_neutral_vertices, smpl_aligned], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+        # Better alignment raining loop
+    coords_to_optim = torch.tensor((center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2]))
+    coords_to_optim.requires_grad = True
+    lr1 = 0.00000001
+    optimizer1 = torch.optim.Adam([coords_to_optim], lr=lr1)
+    print("Init positions deca: {}, {}, {}", center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2])
+    print("Init positions smpl: {}, {}, {}", coords_to_optim[0], coords_to_optim[1], coords_to_optim[2])
+    best_current_loss = 9999999
+    best_head_alignment_checkpoint = torch.zeros_like(smpl_aligned)
+    max_iters_without_improvement = 20
+    current_iter_without_improvement = 0
+    max_iters = 1000
+    for epoch in range(0, max_iters):
+        optimizer1.zero_grad()
+
+        smpl_aligned[:, 0] -= coords_to_optim[0]
+        smpl_aligned[:, 1] -= coords_to_optim[1]
+        smpl_aligned[:, 2] -= coords_to_optim[2]
+
+        loss1 = (smpl_aligned - torch.tensor(deca_neutral_vertices)).pow(2).sum()
+        loss1.backward(retain_graph=True)
+        optimizer1.step()
+        print("Distance loss: " + str(loss1))
+
+        if loss1 < best_current_loss:
+            best_current_loss = loss1
+            best_head_alignment_checkpoint = smpl_aligned
+            current_iter_without_improvement = 0
+        else:
+            current_iter_without_improvement += 1
+
+        if current_iter_without_improvement == max_iters_without_improvement:
+            print("Best loss: " + str(loss1) + ". Iters run to optimizarion: " + str(epoch) + ".")
+            break
+
+    coords_to_optim.requires_grad = False
+
+    # Visualize first alignment based on gravity center
+    utils.visualize_meshes([deca_neutral_vertices, best_head_alignment_checkpoint], [generic_deca['f'], generic_deca['f']], visualize=show_meshes)
+
+
+    print("Last positions deca: {}, {}, {}", center_of_gravity_deca_neutral[0], center_of_gravity_deca_neutral[1], center_of_gravity_deca_neutral[2])
+    print("Last positions smpl: {}, {}, {}", coords_to_optim[0], coords_to_optim[1], coords_to_optim[2])
         # After being aligned, calculate shape offsets among both faces
-    shape_offset_deca_and_smplx_neutrals = torch.sub(smpl_neutral_aligned, torch.tensor(deca_neutral_vertices))
+    shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment_checkpoint, torch.tensor(deca_neutral_vertices))
 
 
 
@@ -133,7 +201,7 @@ def main(args):
     selected_vertices = selected_vertices + normal_deca_offsets
     selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals # If next offsets are commented, final body won't have lips correction but will have better neck
         # Apply some optional transforms
-    selected_vertices = applyTransform(selected_vertices)
+    selected_vertices = utils.applyManualTransform(selected_vertices)
         # Replace vertices
     head_vertices_no_expression = selected_vertices
 
@@ -152,7 +220,7 @@ def main(args):
     selected_vertices = selected_vertices + exp_deca_offsets
     selected_vertices = selected_vertices - shape_offset_deca_and_smplx_neutrals  # If next offsets are commented, final body won't have lips correction but will have better neck
         # Apply some optional transforms
-    selected_vertices = applyTransform(selected_vertices)
+    selected_vertices = utils.applyManualTransform(selected_vertices)
         # Replace vertices
     head_vertices_expression = selected_vertices
 
@@ -173,11 +241,11 @@ def main(args):
     best_error = 1e20
     max_iters = 1000
     best_betas = torch.zeros(10, dtype=torch.float32)
-    body_template_smplx = smpl_model.v_template.clone()
+    # body_template_smplx = smpl_model.v_template.clone()
 
     # Tensorboard Initialization
     from torch.utils.tensorboard import SummaryWriter
-    writer = SummaryWriter(f'tensorboard/tensorboard_test')
+    writer = SummaryWriter(f'../tensorboard/tensorboard_test')
     step = 0
 
     # Optimization Loop
@@ -215,9 +283,9 @@ def main(args):
             checkpoint_error = best_error
         if debug_anomalies:
             with torch.autograd.detect_anomaly():
-                loss.backward()  # calculate derivatives
+                loss.backward(retain_graph=True)  # calculate derivatives
         else:
-            loss.backward()  # calculate derivatives
+            loss.backward(retain_graph=True)  # calculate derivatives
         optimizer.step()
 
         if save:
@@ -240,7 +308,7 @@ def main(args):
     smpl_output = smpl_model(betas=best_betas, return_verts=True)
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
     body_only_betas = smpl_output['v_shaped'].squeeze(dim=0)
-    body_only_betas[head_idxs] = head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
+    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_no_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
@@ -257,7 +325,7 @@ def main(args):
     # GENERATE MODEL WITH EXPRESSION
         # First isn't necessary anymore as it would shape again the body and accumulate
         # Second replace heads. This order is important because head from smpl_output is already modified caused by betas
-    body_only_betas[head_idxs] = head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
+    body_only_betas[head_idxs] = utils.head_smoothing(head_vertices_expression.float(), body_only_betas[head_idxs], head_idx=head_idxs)
     smpl_model.v_template = body_only_betas
         # Third and finally do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
     smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
@@ -277,100 +345,61 @@ def main(args):
     # --------------------------- SAVE MODELS ---------------------------
     image_name = name
     for save_type in ['reconstruction', 'animation']:
+
+        # Save DECA head
+        if save_type == 'reconstruction':
+            visdict = id_codedict;
+            opdict = id_opdict
+        else:
+            visdict = transfer_visdict;
+            opdict = transfer_opdict
+        if args.saveDepth:
+            depth_image = deca.render.render_depth(opdict['trans_verts']).repeat(1, 3, 1, 1)
+            visdict['depth_images'] = depth_image
+            cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_depth.jpg'), util.tensor2image(depth_image[0]))
+        if args.saveKpt:
+            np.savetxt(os.path.join(savefolder, name, save_type, name + '_kpt2d.txt'), opdict['landmarks2d'][0].cpu().numpy())
+            np.savetxt(os.path.join(savefolder, name, save_type, name + '_kpt3d.txt'), opdict['landmarks3d'][0].cpu().numpy())
+        if args.saveObj:
+            deca.save_obj(os.path.join(savefolder, name, save_type, name + '.obj'), opdict)
+        if args.saveMat:
+            opdict = util.dict_tensor2npy(opdict)
+            from scipy.io import savemat
+            savemat(os.path.join(savefolder, name, save_type, name + '.mat'), opdict)
+        if args.saveImages:
+            for vis_name in ['inputs', 'rendered_images', 'albedo_images', 'shape_images', 'shape_detail_images']:
+                if vis_name not in visdict.keys():
+                    continue
+                image = util.tensor2image(visdict[vis_name][0])
+                cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_' + vis_name + '.jpg'), util.tensor2image(visdict[vis_name][0]))
+        # -----------------------------------------------------
+
+        # Full body model saving
         if args.saveObj:
             save_path = 'TestSamples/' + save_type +'_' +image_name+'_exp'+name_exp+'.obj'
             if save_type == 'reconstruction':
-                save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
-                if show_meshes:
-                    show_mesh(smpl_vertices_no_expression, smpl_model, head_idxs, head_color)
+                utils.save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
+                utils.visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             else:
-                save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
-                if show_meshes:
-                    show_mesh(smpl_vertices_expression, smpl_model, head_idxs, head_color)
+                utils.save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
+                utils.visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
             if os.path.exists(save_path):
                 print(f'Successfully saved {save_path}')
             else:
                 print(f'Error: Failed to save {save_path}')
 
 
-def head_smoothing(deca_head, smplx_head, head_idx):
-    # Weight loading
-    abs_path = os.path.abspath('mask_1')
-    weights = np.fromfile(abs_path, 'float32')
-
-    # Calculations
-    # First one doesn´t work correctly. Why?
-    """
-    head_weights = torch.tensor(weights[head_idx]).repeat(1, 3).view(deca_head.shape[0], -1)
-    smpl_coords = torch.mul(smplx_head, head_weights)
-    deca_coords = torch.mul(deca_head, (torch.ones_like(deca_head) - head_weights))
-    new_head = smpl_coords + deca_coords
-    """
-
-    head_weights = torch.tensor(weights[head_idx])
-    new_head = torch.zeros_like(deca_head)
-    for i in range (5023):
-        for j in range (3):
-            smpl_coord = smplx_head[i, j] * head_weights[i]
-            deca_coord = deca_head[i, j] * (1 - head_weights[i])
-            new_head[i, j] = smpl_coord + deca_coord
-
-    return new_head
-
-def getMeshGravityCenter(mesh):
-    if not torch.is_tensor(mesh):
-        mesh = torch.tensor(mesh)
-    summed_coords = torch.sum(mesh, dim=0)
-    gravity_center = torch.div(summed_coords, mesh.shape[0])
-    return gravity_center
-
-def show_mesh(vertices, model, head_idxs, head_color):
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(model.faces)
-    mesh.compute_vertex_normals()
-
-    colors = np.ones_like(vertices) * [0.3, 0.3, 0.3]
-    colors[head_idxs] = head_color
-
-    mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-
-    o3d.visualization.draw_geometries([mesh])
 
 
-def applyTransform(vertices):
-    # Apply manual transformations if desired
-    # Add offset to y coordinate
-    #vertices[:, 1] += 0.15
-    # Add offset to z coordinate
-    #vertices[head_idxs, 2] += 0.045
-    # Add scaling
-    #vertices[head_idxs, :] *= 0.5
-    #vertices[:] *= 1.2
-    return vertices
 
-def save_obj(filename, vertices, faces):
-    vertices = vertices
-    faces = faces
-    from smplx_deca_main.smplx.smplx import utils
-    utils.write_obj(filename, vertices, faces)
-    print("Model Saved")
 
-def apply_rotation(x_degrees = 0, y_degrees=0, z_degrees=0):
-    global_orient = torch.zeros([1, 3], dtype=torch.float32)
-    global_orient[0, 0] = x_degrees
-    global_orient[0, 1] = y_degrees
-    global_orient[0, 2] = z_degrees
-    degrees_to_rads = 3.14159/180
-    global_orient *= degrees_to_rads
-    return global_orient
 
-def apply_global_translation(x = 0, y=0, z=0):
-    global_orient = torch.zeros([1, 3], dtype=torch.float32)
-    global_orient[0, 0] = x
-    global_orient[0, 1] = y
-    global_orient[0, 2] = z
-    return global_orient
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
@@ -381,7 +410,7 @@ if __name__ == '__main__':
                         help='path to input image')
     parser.add_argument('-e', '--exp_path', default='TestSamples/exp/7.jpg', type=str,
                         help='path to expression')
-    parser.add_argument('-s', '--savefolder', default='TestSamples/animation_results', type=str,
+    parser.add_argument('-s', '--savefolder', default='TestSamples/deca_head', type=str,
                         help='path to the output directory, where results(obj, txt files) will be stored.')
     parser.add_argument('--device', default='cuda', type=str,
                         help='set device, cpu for using cpu')
@@ -389,6 +418,8 @@ if __name__ == '__main__':
     parser.add_argument('--rasterizer_type', default='standard', type=str,
                         help='rasterizer type: pytorch3d or standard')
     # process test images
+    parser.add_argument('--extractTex', default=True, type=lambda x: x.lower() in ['true', '1'],
+                        help='whether to extract texture from input image as the uv texture map, set false if you want albeo map from FLAME mode')
     parser.add_argument('--iscrop', default=True, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to crop input image, set false only when the test image are well cropped')
     parser.add_argument('--detector', default='fan', type=str,
