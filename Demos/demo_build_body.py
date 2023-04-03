@@ -4,7 +4,7 @@ import argparse
 import torch
 import numpy as np
 import cv2
-from torch.nn import Parameter
+import warnings
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from smplx_deca_main.deca.decalib.deca import DECA
@@ -39,7 +39,7 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # Select identity images
-    identities = utils.input_identities(['Javi2.jpg', '5.jpg'])
+    identities = utils.input_identities(['IMG_0392_inputs.jpg', 'IMG_0392_inputs.jpg'])
 
     # Select expression images
     expressions = utils.input_expressions(['7.jpg', '0.jpg'])
@@ -80,8 +80,8 @@ def main(args):
         raise Exception("Body shape parameters are missing. You need to export them.")
 
     if select_body_manually and len(identities) != len(body_shapes):
-        print("Warning. Some models won't compute since there is no betas for them."
-              "Remember to export the same amount of betas as identity images are.")
+        warnings.warn("Warning. Some models won't compute since there is no betas for them."
+                      "Remember to export the same amount of betas as identity images are.")
 
     for j in range(len(identities)):
         identity_path = identities[j]
