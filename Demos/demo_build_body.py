@@ -39,7 +39,7 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # Select identity images
-    identities = utils.input_identities(['IMG_0392_inputs.jpg', '5.jpg'])
+    identities = utils.input_identities(['Javi2.jpg', '5.jpg'])
 
     # Select expression images
     expressions = utils.input_expressions(['7.jpg', '0.jpg'])
@@ -79,6 +79,9 @@ def main(args):
     if select_body_manually and len(body_shapes) == 0:
         raise Exception("Body shape parameters are missing. You need to export them.")
 
+    if select_body_manually and len(identities) != len(body_shapes):
+        print("Warning. Some models won't compute since there is no betas for them."
+              "Remember to export the same amount of betas as identity images are.")
 
     for j in range(len(identities)):
         identity_path = identities[j]
@@ -97,13 +100,7 @@ def main(args):
         # Body orientation
         global_orient = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
         # Body pose
-        body_pose = torch.zeros([1, 63], dtype=torch.float32)
-        # 1º joint left leg
-        # body_pose[0, :3] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
-        # 1º joint rigth leg
-        # body_pose[0, 3:6] = create_local_rotation(x_degrees=45.0, y_degrees=45.0, z_degrees=45.0)
-        # pelvis
-        body_pose[0, 6:9] = utils.create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+        body_pose = utils.pose_model()
 
         # Build smplx init model
         smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
@@ -129,12 +126,16 @@ def main(args):
         # Get dict to generate no expression head model
         with torch.no_grad():
             id_codedict = deca.encode(images)
+        # Extract texture information before posing head in rest pose
+        auxiliar_opdict, auxiliar_visdict = deca.decode(id_codedict)
         # Clear expresion and pose parameters from DECA generated head as it will help fitting the model better.
         id_codedict['exp'] = torch.zeros((1, 50))
         id_codedict['pose'] = torch.zeros((1, 6))
-        id_codedict['cam'] = torch.tensor((9.5878, 0.0057931, 0.024715), dtype=torch.float32)
         id_opdict, id_visdict = deca.decode(id_codedict)
         id_visdict = {x: id_visdict[x] for x in ['inputs', 'shape_detail_images']}
+        # Transfer well generated textures (from posed head) to non-posed head dict
+        id_opdict = utils.transfer_texture_information(id_opdict, auxiliar_opdict)
+
 
         # Get dict to generate expression head model
         # -- expression transfer
