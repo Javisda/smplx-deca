@@ -152,9 +152,9 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=100, m
     # Return optimized mesh1
     return best_alignment_checkpoint
 
-def learn_body_from_head(head_shape, smpl_model, head_idxs):
+def learn_body_from_head(head, smpl_model, head_idxs):
     # 1º Get head shape to learn body from
-    head_shape = head_shape
+    head_shape = head
 
     # 2º Hyper-parameters
     lr = 0.2
@@ -225,3 +225,23 @@ def learn_body_from_head(head_shape, smpl_model, head_idxs):
     print("Mejor loss: {}", best_error)
 
     return best_betas
+
+def input_identities(names_of_identities):
+    absolute_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    identity_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'examples')
+    paths = []
+    for identity in names_of_identities:
+        path = os.path.join(identity_path, identity)
+        paths.append(path)
+
+    return paths
+
+def input_expressions(names_of_expressions):
+    absolute_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    identity_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'exp')
+    paths = []
+    for expression in names_of_expressions:
+        path = os.path.join(identity_path, expression)
+        paths.append(path)
+
+    return paths

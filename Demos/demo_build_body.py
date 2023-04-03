@@ -38,23 +38,11 @@ def main(args):
     device = args.device
     os.makedirs(savefolder, exist_ok=True)
 
-    absolute_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-
     # Select identity images
-    identity_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'examples')
-    identity_1 = os.path.join(identity_path, 'IMG_0392_inputs.jpg')
-    identity_2 = os.path.join(identity_path, '5.jpg')
-    identities = []
-    identities.append(identity_1)
-    #identities.append(identity_2)
+    identities = utils.input_identities(['IMG_0392_inputs.jpg', '5.jpg'])
 
     # Select expression images
-    expression_path = os.path.join(absolute_path, 'smplx-deca', 'decaTestSamples', 'exp')
-    expression_1 = os.path.join(expression_path, '7.jpg')
-    expression_2 = os.path.join(expression_path, '0.jpg')
-    expressions = []
-    expressions.append(expression_1)
-    expressions.append(expression_2)
+    expressions = utils.input_expressions(['7.jpg', '0.jpg'])
 
     # Select bodies
     smpl_betas_1 = torch.tensor([0.3776465356349945,
@@ -67,27 +55,32 @@ def main(args):
                                1.602636456489563,
                                -1.5878002643585205,
                                -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
+    smpl_betas_1 = torch.randn([1, 10], dtype=torch.float32)
     smpl_betas_2 = torch.ones([1, 10], dtype=torch.float32) * (-1)
     body_shapes = []
     body_shapes.append(smpl_betas_1)
     body_shapes.append(smpl_betas_2)
 
     # Select genders
-    gender_1 = 'male'
-    gender_2 = 'female'
-    genders = []
-    genders.append(gender_1)
-    genders.append(gender_2)
+    genders = ['neutral', 'neutral']
 
     if select_body_manually:
         import run_ui
-        body_shapes, expression = run_ui.run_ui()
+        body_shapes, smpl_expression = run_ui.run_ui()
         for idx in range(len(genders)):
             genders[idx] = 'neutral'
 
+    # Check input errors
+    if (len(identities) == 0 or
+        len(expressions) == 0 or
+        len(identities) != len(expressions)):
+        raise Exception("Input images are wrong. Expression and identity images length must match and be non zero")
+
+    if select_body_manually and len(body_shapes) == 0:
+        raise Exception("Body shape parameters are missing. You need to export them.")
+
 
     for j in range(len(identities)):
-
         identity_path = identities[j]
         expression_path = expressions[j]
         body_shape_parameters = body_shapes[j]
