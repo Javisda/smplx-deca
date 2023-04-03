@@ -245,3 +245,26 @@ def input_expressions(names_of_expressions):
         paths.append(path)
 
     return paths
+
+def transfer_texture_information(id_opdict, auxiliar_opdict):
+    id_opdict['uv_texture_gt'] = auxiliar_opdict['uv_texture_gt']
+    id_opdict['rendered_images'] = auxiliar_opdict['rendered_images']
+    id_opdict['alpha_images'] = auxiliar_opdict['alpha_images']
+    id_opdict['normal_images'] = auxiliar_opdict['normal_images']
+    id_opdict['albedo'] = auxiliar_opdict['albedo']
+    id_opdict['uv_texture'] = auxiliar_opdict['uv_texture']
+    id_opdict['normals'] = auxiliar_opdict['normals']
+    id_opdict['uv_detail_normals'] = auxiliar_opdict['uv_detail_normals']
+    id_opdict['displacement_map'] = auxiliar_opdict['displacement_map']
+    return id_opdict
+
+def pose_model():
+    body_pose = torch.zeros([1, 63], dtype=torch.float32)
+    # 1º joint left leg
+    body_pose[0,  :3] = create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    # 1º joint rigth leg
+    body_pose[0, 3:6] = create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+    # pelvis
+    body_pose[0, 6:9] = create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
+
+    return body_pose
