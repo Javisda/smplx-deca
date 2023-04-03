@@ -424,7 +424,7 @@ class AppWindow:
             self._body_model_shape_comp.add_item(f'{i + 1:02d}')
 
         self._body_beta_val = gui.Slider(gui.Slider.DOUBLE)
-        self._body_beta_val.set_limits(-5.0, 5.0)
+        self._body_beta_val.set_limits(-2.5, 2.5)
         self._body_beta_tensor = torch.zeros(1, 10)
         self._body_beta_reset = gui.Button("Reset betas")
 
