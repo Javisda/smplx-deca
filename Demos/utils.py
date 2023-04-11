@@ -98,7 +98,7 @@ def get_mesh_root(mesh):
     root = torch.tensor([root_x, root_y, root_z])
 
     return root
-def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=100, max_iters_without_improvement=20):
+def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
 
     if not torch.is_tensor(mesh1):
         mesh1 = torch.from_numpy(mesh1)
@@ -247,15 +247,11 @@ def input_expressions(names_of_expressions):
     return paths
 
 def transfer_texture_information(id_opdict, auxiliar_opdict):
-    id_opdict['uv_texture_gt'] = auxiliar_opdict['uv_texture_gt']
-    id_opdict['rendered_images'] = auxiliar_opdict['rendered_images']
-    id_opdict['alpha_images'] = auxiliar_opdict['alpha_images']
-    id_opdict['normal_images'] = auxiliar_opdict['normal_images']
-    id_opdict['albedo'] = auxiliar_opdict['albedo']
-    id_opdict['uv_texture'] = auxiliar_opdict['uv_texture']
-    id_opdict['normals'] = auxiliar_opdict['normals']
-    id_opdict['uv_detail_normals'] = auxiliar_opdict['uv_detail_normals']
-    id_opdict['displacement_map'] = auxiliar_opdict['displacement_map']
+    for texture_name in ['uv_texture_gt', 'rendered_images', 'alpha_images',
+                         'normal_images', 'albedo', 'uv_texture', 'normals',
+                         'uv_detail_normals', 'displacement_map']:
+        id_opdict[texture_name] = auxiliar_opdict[texture_name]
+
     return id_opdict
 
 def pose_model():

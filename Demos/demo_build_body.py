@@ -131,6 +131,7 @@ def main(args):
         # Clear expresion and pose parameters from DECA generated head as it will help fitting the model better.
         id_codedict['exp'] = torch.zeros((1, 50))
         id_codedict['pose'] = torch.zeros((1, 6))
+        # Generate deca head without pose and expression (textures need to be transfered from the auxiliar_opdict decoder)
         id_opdict, id_visdict = deca.decode(id_codedict)
         id_visdict = {x: id_visdict[x] for x in ['inputs', 'shape_detail_images']}
         # Transfer well generated textures (from posed head) to non-posed head dict
