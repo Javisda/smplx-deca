@@ -145,8 +145,8 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
             current_iter_without_improvement += 1
 
         # Check if optimization isn't improving for a number of steps
-        if current_iter_without_improvement == max_iters_without_improvement or step == max_iters:
-            print("Total iterations: " + str(step))
+        if (current_iter_without_improvement == max_iters_without_improvement) or (step == (max_iters - 1)):
+            print("Total iterations of improvement: " + str(step))
             break
 
     coords_to_optimize.requires_grad = False

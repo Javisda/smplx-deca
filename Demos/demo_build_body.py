@@ -22,8 +22,8 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
-    learn_body = True
-    select_body_manually = False
+    learn_body = False
+    select_body_manually = True
     generate_full_body_textures = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
@@ -40,22 +40,22 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # Select identity images
-    identities = utils.input_identities(['Javi2.jpg'])
+    identities = utils.input_identities(['IMG_0392_inputs.jpg'])
 
     # Select expression images
-    expressions = utils.input_expressions(['0.jpg'])
+    expressions = utils.input_expressions(['7.jpg'])
 
     # Select bodies
     smpl_betas_1 = torch.tensor([0.3776465356349945,
-                               -1.1383668184280396,
-                               3.765796422958374,
-                               -3.6816511154174805,
-                               -1.0226212739944458,
-                               -3.976848602294922,
-                               -4.116629123687744,
-                               1.602636456489563,
-                               -1.5878002643585205,
-                               -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
+                                -1.1383668184280396,
+                                 3.765796422958374,
+                                -3.6816511154174805,
+                                -1.0226212739944458,
+                                -3.976848602294922,
+                                -4.116629123687744,
+                                 1.602636456489563,
+                                -1.5878002643585205,
+                                -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
     smpl_betas_1 = torch.randn([1, 10], dtype=torch.float32)
     smpl_betas_2 = torch.ones([1, 10], dtype=torch.float32) * (-1)
     body_shapes = []
@@ -176,7 +176,7 @@ def main(args):
         # 1º Calculate offsets between pairs of heads
         generated_deca_head_no_expression = id_opdict['verts'].detach().clone()
         generated_deca_head_expression = transfer_opdict['verts'].detach().clone()
-        deca_neutral_head = deca_neutral_vertices
+        deca_neutral_head = torch.from_numpy(deca_neutral_vertices)
         smplx_neutral_head = smpl_model.v_template[head_idxs]
         generated_smplx_head = smpl_body_generated[head_idxs]
         heads_to_align = [generated_deca_head_expression, generated_deca_head_no_expression, deca_neutral_head, smplx_neutral_head, generated_smplx_head]
@@ -194,8 +194,6 @@ def main(args):
             root_to_root_offsets = torch.sub(gravity_center_1, gravity_center_2)
 
             # Having the offsets, make an initial guess of alignment
-            if not torch.is_tensor(head_1):
-                head_1 = torch.from_numpy(head_1)
             head_1_aligned = head_1 - root_to_root_offsets
 
             # Visualize first alignment based on gravity center
@@ -203,15 +201,14 @@ def main(args):
                                    visualize=False)
 
             # Better alignment raining loop
-            best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=1)
+            best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=200)
 
             # Visualize second alignment after optimization
             utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
                                    visualize=False)
 
             # After optimization, calculate shape offsets among both faces
-            shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment,
-                                                             torch.tensor(head_2))
+            shape_offset_deca_and_smplx_neutrals = torch.sub(best_head_alignment, head_2)
 
             # Accumulate offset
             if i == 0:
