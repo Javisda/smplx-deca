@@ -283,7 +283,7 @@ class SRenderY(nn.Module):
             albedo_images = albedo_images*alpha_images + background*(1.-alpha_images)
         else:
             images = images*alpha_images 
-            albedo_images = albedo_images*alpha_images 
+            albedo_images = albedo_images*alpha_images
 
         outputs = {
             'images': images,
@@ -396,7 +396,7 @@ class SRenderY(nn.Module):
             normal_images = detail_normal_images
 
         shading = self.add_directionlight(normal_images.permute(0,2,3,1).reshape([batch_size, -1, 3]), lights)
-        shading_images = shading.reshape([batch_size, albedo_images.shape[2], albedo_images.shape[3], 3]).permute(0,3,1,2).contiguous()        
+        shading_images = shading.reshape([batch_size, albedo_images.shape[2], albedo_images.shape[3], 3]).permute(0,3,1,2).contiguous()
         shaded_images = albedo_images*shading_images
 
         alpha_images = alpha_images*pos_mask

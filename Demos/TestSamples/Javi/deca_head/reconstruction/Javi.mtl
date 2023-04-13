@@ -1,0 +1,3 @@
+newmtl FaceTexture
+map_Kd Javi.png
+disp TestSamples/Javi/deca_head/reconstruction/Javi_normals.png
