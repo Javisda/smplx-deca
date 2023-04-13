@@ -22,8 +22,9 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
-    learn_body = False
-    select_body_manually = True
+    learn_body = True
+    select_body_manually = False
+    generate_full_body_textures = True
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -39,10 +40,10 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # Select identity images
-    identities = utils.input_identities(['IMG_0392_inputs.jpg', 'IMG_0392_inputs.jpg'])
+    identities = utils.input_identities(['Javi2.jpg'])
 
     # Select expression images
-    expressions = utils.input_expressions(['7.jpg', '0.jpg'])
+    expressions = utils.input_expressions(['0.jpg'])
 
     # Select bodies
     smpl_betas_1 = torch.tensor([0.3776465356349945,
@@ -62,7 +63,7 @@ def main(args):
     body_shapes.append(smpl_betas_2)
 
     # Select genders
-    genders = ['neutral', 'neutral']
+    genders = ['male', 'neutral']
 
     if select_body_manually:
         import run_ui
@@ -79,11 +80,13 @@ def main(args):
     if select_body_manually and len(body_shapes) == 0:
         raise Exception("Body shape parameters are missing. You need to export them.")
 
-    if select_body_manually and len(identities) != len(body_shapes):
+    if select_body_manually and len(identities) > len(body_shapes):
         warnings.warn("Warning. Some models won't compute since there is no betas for them."
                       "Remember to export the same amount of betas as identity images are.")
 
     for j in range(len(identities)):
+
+        # Sample params
         identity_path = identities[j]
         expression_path = expressions[j]
         body_shape_parameters = body_shapes[j]
@@ -150,8 +153,8 @@ def main(args):
         id_codedict['exp'] = exp_codedict['exp']
         transfer_opdict, transfer_visdict = deca.decode(id_codedict)
         id_visdict['transferred_shape'] = transfer_visdict['shape_detail_images']
-        os.makedirs(os.path.join(savefolder, name, 'images'), exist_ok=True)
-        cv2.imwrite(os.path.join(savefolder, name, 'images/animation.jpg'), deca.visualize(id_visdict))
+        os.makedirs(os.path.join(savefolder, name, 'deca_head'), exist_ok=True)
+        cv2.imwrite(os.path.join(savefolder, name, 'deca_head/animation.jpg'), deca.visualize(id_visdict))
 
         transfer_opdict['uv_texture_gt'] = id_opdict['uv_texture_gt']
         if args.saveDepth or args.saveKpt or args.saveObj or args.saveMat or args.saveImages:
@@ -200,7 +203,7 @@ def main(args):
                                    visualize=False)
 
             # Better alignment raining loop
-            best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2)
+            best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=1)
 
             # Visualize second alignment after optimization
             utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
@@ -283,6 +286,18 @@ def main(args):
         print('Joints shape (SMPLX) =', smpl_joints_body.shape)
 
 
+        # ------------------------ UV MIXING TEXTURES------------------------
+        if generate_full_body_textures:
+            albedo_flame_tex = util.tensor2image(id_opdict['uv_texture_gt'][0])
+            normal_map_flame_tex = util.tensor2image(id_opdict['uv_detail_normals'][0] * 0.5 + 0.5)
+            smplx_albedo_tex, smplx_normal_map_tex = utils.generate_flame_to_smplx_fitting_textures(corr_fname,
+                                                                                                    albedo_flame_tex,
+                                                                                                    normal_map_flame_tex)
+            from uv_mixing_utils import read_uv_faces_id_from_obj, read_uv_coordinates_from_obj
+            # smplx-addon.obj is a template smplx .obj that holds uv coords and uv faces, key for this step
+            smplx_uv_coords = read_uv_coordinates_from_obj("UV_mixing_resources/smplx-addon.obj")
+            smplx_uv_faces = read_uv_faces_id_from_obj("UV_mixing_resources/smplx-addon.obj")
+
         # --------------------------- SAVE MODELS ---------------------------
         for save_type in ['reconstruction', 'animation']:
 
@@ -312,14 +327,25 @@ def main(args):
 
             # Full body model saving
             if args.saveObj:
+                # Check if needed directories exist
                 os.makedirs(os.path.join(savefolder, name, 'body_models'), exist_ok=True)
-                save_path = os.path.join(savefolder, name + '/body_models/' + save_type +'_exp'+name_exp+'.obj')
+                os.makedirs(os.path.join(savefolder, name, 'textured_body_models'), exist_ok=True)
+                # Create model root path
+                save_path = os.path.join(savefolder, name)
                 if save_type == 'reconstruction':
-                    utils.save_obj(save_path, smpl_vertices_no_expression, smpl_model.faces)
+                    utils.save_obj(os.path.join(save_path, 'body_models', 'normal_model.obj'), smpl_vertices_no_expression, smpl_model.faces)
                     utils.visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
+                    if generate_full_body_textures:
+                        util.write_obj(os.path.join(save_path, 'textured_body_models', 'normal_model.obj'), smpl_vertices_no_expression, smpl_model.faces,
+                                       texture=smplx_albedo_tex, normal_map=smplx_normal_map_tex,
+                                       uvcoords=smplx_uv_coords, uvfaces=smplx_uv_faces)
                 else:
-                    utils.save_obj(save_path, smpl_vertices_expression, smpl_model.faces)
+                    utils.save_obj(os.path.join(save_path, 'body_models', 'exp_' + name_exp + '.obj'), smpl_vertices_expression, smpl_model.faces)
                     utils.visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
+                    if generate_full_body_textures:
+                        util.write_obj(os.path.join(save_path, 'textured_body_models', 'exp_' + name_exp + '.obj'), smpl_vertices_expression, smpl_model.faces,
+                                       texture=smplx_albedo_tex, normal_map=smplx_normal_map_tex,
+                                       uvcoords=smplx_uv_coords, uvfaces=smplx_uv_faces)
                 if os.path.exists(save_path):
                     print(f'Successfully saved {save_path}')
                 else:
