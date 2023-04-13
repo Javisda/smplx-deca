@@ -295,7 +295,7 @@ def main(args):
 
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
-    abs_path = os.path.abspath('../mask_1')
+    abs_path = os.path.abspath('../Neck_masks/mask_1')
     weights = np.fromfile(abs_path, 'float32')
 
     # Calculations

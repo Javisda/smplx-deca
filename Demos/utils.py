@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import open3d as o3d
 import os
+import cv2
 
 def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None, head_color=None):
     if visualize is False or (len(mesh_vertices) != len(mesh_faces)):
@@ -34,7 +35,7 @@ def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None,
 
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
-    abs_path = os.path.abspath('mask_1')
+    abs_path = os.path.abspath('Neck_masks/mask_1')
     weights = np.fromfile(abs_path, 'float32')
 
     # Calculations
@@ -133,7 +134,7 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
         optimizer.zero_grad()
         loss.backward(retain_graph=True)
         optimizer.step()
-        print("Distance loss: " + str(loss))
+        #print("Distance loss: " + str(loss))
 
         # Update the best loss and mesh checkpoint if needed
         if loss < best_loss:
@@ -144,7 +145,7 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
             current_iter_without_improvement += 1
 
         # Check if optimization isn't improving for a number of steps
-        if current_iter_without_improvement == max_iters_without_improvement:
+        if current_iter_without_improvement == max_iters_without_improvement or step == max_iters:
             print("Total iterations: " + str(step))
             break
 
@@ -264,3 +265,68 @@ def pose_model():
     body_pose[0, 6:9] = create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
     return body_pose
+
+def flame_smplx_texture_combine(flame_obj,
+                                smplx_obj,
+                                flame_texture,
+                                smplx_texture,
+                                smplx_flame_vertex_ids):
+
+    from uv_mixing_utils import get_smplx_flame_crossrespondence_face_ids, affine_transform
+    flame_2_smplx_uv_ids, smplx_faces, smplx_uv, flame_faces, flame_uv = get_smplx_flame_crossrespondence_face_ids(
+        smplx_obj, flame_obj, smplx_flame_vertex_ids)
+
+    #
+    flame_texture = cv2.resize(flame_texture, [1024, 1024])
+    smplx_texture = cv2.imread(smplx_texture)
+    smplx_texture = cv2.resize(smplx_texture, [2048, 2048])
+
+    f_h, f_w, _ = flame_texture.shape
+    s_h, s_w, _ = smplx_texture.shape
+
+    flame_uv[:, 1] *= f_h
+    flame_uv[:, 0] *= f_w
+    flame_uv = flame_uv.astype(np.int)
+
+    smplx_uv[:, 1] *= s_h
+    smplx_uv[:, 0] *= s_w
+    smplx_uv = smplx_uv.astype(np.int)
+
+    import tqdm
+    for id in tqdm.tqdm(flame_2_smplx_uv_ids.keys()):
+        f_uv_id = id
+        s_uv_id = flame_2_smplx_uv_ids[id]
+
+        flame_idx = flame_faces[f_uv_id]
+        smplx_idx = smplx_faces[s_uv_id]
+
+        flame_p = flame_uv[flame_idx]
+        smplx_p = smplx_uv[smplx_idx]
+        smplx_texture = affine_transform(flame_p, smplx_p, flame_texture, smplx_texture)
+
+    smplx_texture = cv2.medianBlur(smplx_texture, 11)
+
+    return smplx_texture
+
+def generate_flame_to_smplx_fitting_textures(correspondences, flame_albedo, flame_normal_map):
+
+    # Resources
+    smplx_obj = "UV_mixing_resources/smplx-addon.obj"
+    flame_obj = "UV_mixing_resources/head_template.obj"
+    smplx_2_flame_correspondences = correspondences
+    smplx_albedo_texture = "UV_mixing_resources/smplx_texture_m_alb.png"
+    flame_albedo_texture = flame_albedo
+    flame_normal_map_texture = flame_normal_map
+
+    # Parallelization to get normal map and albedo textures
+    def test(texture):
+        out_img = flame_smplx_texture_combine(flame_obj, smplx_obj, texture,
+                                              smplx_albedo_texture, smplx_2_flame_correspondences)
+        return out_img
+
+    from joblib import Parallel, delayed
+
+    textures = Parallel(n_jobs=2, backend="loky", verbose=0)(delayed(test)
+                       (tex) for tex in [flame_albedo_texture, flame_normal_map_texture])
+
+    return textures
