@@ -60,7 +60,6 @@ def get_smplx_flame_crossrespondence_face_ids(smplx_template_obj,
         smplx_template_obj: smplx template obj /to/path/file.obj
         flame_template_obj: flame template obj /to/path/file.obj
         smplx_flame_vertex_ids: the smplx vertices id crossresponding to flame
-        size: the tmp texture size.
     output:
         flame_2_smplx_uv_ids: {flame_uv_id:smplx_uv_id,....}
         s_f_uvs: smplx uv faces
@@ -69,26 +68,20 @@ def get_smplx_flame_crossrespondence_face_ids(smplx_template_obj,
         f_uv: flame uv coordinates.
     '''
 
-    size = 1024
     # get smplx info from smplx template obj file.
-    # s_verts = read_vertex_from_obj(smplx_template_obj)
     s_f_ids = read_vertex_faces_id_from_obj(smplx_template_obj)
     s_f_uvs = read_uv_faces_id_from_obj(smplx_template_obj)
     s_uv = read_uv_coordinates_from_obj(smplx_template_obj)
-    # s_tex = np.zeros((size,size, 3), np.uint8)
 
     s_uv[:, 1] = 1 - s_uv[:, 1]  # y--v
-    # s_uv = (s_uv*size).astype(np.int)
 
     # get flame info from flame template obj file.
     f_verts = read_vertex_from_obj(flame_template_obj)
     f_f_ids = read_vertex_faces_id_from_obj(flame_template_obj)
     f_f_uvs = read_uv_faces_id_from_obj(flame_template_obj)
     f_uv = read_uv_coordinates_from_obj(flame_template_obj)
-    # f_tex = np.zeros((size,size, 3), np.uint8)
 
     f_uv[:, 1] = 1 - f_uv[:, 1]  # y--v
-    # f_uv = (f_uv*size).astype(np.int)
 
     # smplx to flame vertex ids
     sf_ids = np.load(smplx_flame_vertex_ids)
