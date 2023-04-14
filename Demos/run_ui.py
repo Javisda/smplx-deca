@@ -3,6 +3,7 @@ import copy
 import glob
 import torch
 import joblib
+import random
 import platform
 import numpy as np
 import open3d as o3d
@@ -404,6 +405,9 @@ class AppWindow:
         # ----------------------------------- #
         # ------- BODY MODEL SETTINGS ------- #
         # ----------------------------------- #
+        self._last_body_beta_selected = 0
+        self._last_exp_beta_selected = 0
+        self._num_model_exports = 0
         self.preload_body_models()
         self._scene.scene.show_ground_plane(self.settings.show_ground, rendering.Scene.GroundPlane(0))
         self.model_settings = gui.CollapsableVert("Model settings", 0,
@@ -427,6 +431,7 @@ class AppWindow:
         self._body_beta_val.set_limits(-2.5, 2.5)
         self._body_beta_tensor = torch.zeros(1, 10)
         self._body_beta_reset = gui.Button("Reset betas")
+        self._body_randomize = gui.Button("Randomize body")
 
         self._body_beta_text = gui.Label("Betas")
         self._body_beta_text.text = f",".join(f'{x:.1f}' for x in self._body_beta_tensor[0].numpy().tolist())
@@ -437,9 +442,10 @@ class AppWindow:
             self._body_model_exp_comp.add_item(f'{i + 1:02d}')
 
         self._body_exp_val = gui.Slider(gui.Slider.DOUBLE)
-        self._body_exp_val.set_limits(-5.0, 5.0)
+        self._body_exp_val.set_limits(-4.0, 4.0)
         self._body_exp_tensor = torch.zeros(1, 10)
         self._body_exp_reset = gui.Button("Reset expression")
+        self._exp_randomize = gui.Button("Randomize expression")
 
         self._body_exp_text = gui.Label("Expression")
         self._body_exp_text.text = f",".join(f'{x:.1f}' for x in self._body_exp_tensor[0].numpy().tolist())
@@ -453,10 +459,12 @@ class AppWindow:
 
         self._body_beta_val.set_on_value_changed(self._on_body_beta_val)
         self._body_beta_reset.set_on_clicked(self._on_body_beta_reset)
+        self._body_randomize.set_on_clicked(self._on_body_randomize)
         self._body_model_shape_comp.set_on_selection_changed(self._on_body_model_shape_comp)
 
         self._body_exp_val.set_on_value_changed(self._on_body_exp_val)
         self._body_exp_reset.set_on_clicked(self._on_body_exp_reset)
+        self._exp_randomize.set_on_clicked(self._on_exp_randomize)
         self._body_model_exp_comp.set_on_selection_changed(self._on_body_model_exp_comp)
 
         self._quit_and_export.set_on_clicked(self._on_menu_quit)
@@ -476,6 +484,9 @@ class AppWindow:
         h = gui.Horiz(0.25 * em)  # row 2
         h.add_child(self._body_beta_reset)
         self.model_settings.add_child(h)
+        h = gui.Horiz(0.25 * em)  # row 3
+        h.add_child(self._body_randomize)
+        self.model_settings.add_child(h)
 
         grid = gui.VGrid(2, 0.25 * em)
         grid.add_child(gui.Label("Exp Component"))
@@ -484,15 +495,27 @@ class AppWindow:
         grid.add_child(self._body_exp_val)
         self.model_settings.add_child(grid)
 
+
+
+
         h = gui.Horiz(0.25 * em)  # row 2
         h.add_child(self._body_exp_reset)
         self.model_settings.add_child(h)
 
         h = gui.Horiz(0.25 * em)  # row 3
-        h.add_child(self._save_body_shape)
+        h.add_child(self._exp_randomize)
         self.model_settings.add_child(h)
 
         h = gui.Horiz(0.25 * em)  # row 4
+        h.add_child(self._save_body_shape)
+        self.model_settings.add_child(h)
+        # Models exported
+        h = gui.Horiz(0.25 * em)
+        self.text_label = gui.Label("Models saved: " + str(self._num_model_exports))
+        h.add_child(self.text_label)
+        self.model_settings.add_child(h)
+
+        h = gui.Horiz(0.25 * em)  # row 5
         h.add_child(self._quit_and_export)
         self.model_settings.add_child(h)
 
@@ -726,9 +749,11 @@ class AppWindow:
 
     def _on_body_model_shape_comp(self, name, index):
         self._body_beta_val.double_value = self._body_beta_tensor[0, index].item()
+        self._last_body_beta_selected = index
 
     def _on_body_model_exp_comp(self, name, index):
         self._body_exp_val.double_value = self._body_exp_tensor[0, index].item()
+        self._last_exp_beta_selected = index
 
     def _on_body_beta_reset(self):
         self._body_beta_tensor = torch.zeros(1, 10)
@@ -739,10 +764,30 @@ class AppWindow:
             gender=self._body_model_gender.selected_text,
         )
 
+    def _on_body_randomize(self):
+        random_numbers = [random.uniform(-2.5, 2.5) for i in range(10)]
+        self._body_beta_tensor = torch.FloatTensor(random_numbers).view(1, 10)
+        self._body_beta_text.text = f",".join(f'{x:.1f}' for x in self._body_beta_tensor[0].numpy().tolist())
+        self._body_beta_val.double_value = self._body_beta_tensor[0, self._last_body_beta_selected].item()
+        self.load_body_model(
+            self._body_model.selected_text,
+            gender=self._body_model_gender.selected_text,
+        )
+
     def _on_body_exp_reset(self):
         self._body_exp_tensor = torch.zeros(1, 10)
         self._body_exp_text.text = f",".join(f'{x:.1f}' for x in self._body_exp_tensor[0].numpy().tolist())
         self._body_exp_val.double_value = 0.0
+        self.load_body_model(
+            self._body_model.selected_text,
+            gender=self._body_model_gender.selected_text,
+        )
+
+    def _on_exp_randomize(self):
+        random_numbers = [random.uniform(-4.0, 4.0) for i in range(10)]
+        self._body_exp_tensor = torch.FloatTensor(random_numbers).view(1, 10)
+        self._body_exp_text.text = f",".join(f'{x:.1f}' for x in self._body_exp_tensor[0].numpy().tolist())
+        self._body_exp_val.double_value = self._body_exp_tensor[0, self._last_exp_beta_selected].item()
         self.load_body_model(
             self._body_model.selected_text,
             gender=self._body_model_gender.selected_text,
@@ -846,6 +891,8 @@ class AppWindow:
         self.full_body_shapes.append(body_betas)
         expression = self._body_exp_tensor.clone().detach()
         self.expression_betas.append(expression)
+        self._num_model_exports += 1
+        self.text_label.text = "Models saved: " + str(self._num_model_exports)
 
     def _on_menu_toggle_settings_panel(self):
         self._settings_panel.visible = not self._settings_panel.visible

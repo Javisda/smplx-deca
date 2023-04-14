@@ -22,7 +22,7 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
-    learn_body = True
+    learn_body = False
     select_body_manually = True
     generate_full_body_textures = True
     # ------------ SMPLX ------------
@@ -72,7 +72,7 @@ def main(args):
     if select_body_manually:
         import run_ui
         # Exports betas selected in 3D viewer
-        body_shapes, smpl_expression = run_ui.run_ui()
+        body_shapes, smpl_expressions = run_ui.run_ui()
         for idx in range(len(genders)):
             genders[idx] = 'neutral'
 
@@ -96,6 +96,7 @@ def main(args):
         expression_path = expressions[j]
         body_shape_parameters = body_shapes[j]
         gender = genders[j]
+        smpl_expression = smpl_expressions[j] if select_body_manually else torch.zeros([1, 10], dtype=torch.float32)
 
         # load test images
         testdata = datasets.TestData(identity_path, iscrop=args.iscrop, face_detector=args.detector)
@@ -111,7 +112,6 @@ def main(args):
         body_pose = utils.pose_model()
 
         # Build smplx init model
-        smpl_expression = torch.zeros([1, 10], dtype=torch.float32)
         smpl_model = smplx.create(model_folder, model_type='smplx',
                              gender=gender,
                              ext=ext)
