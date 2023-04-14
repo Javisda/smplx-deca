@@ -22,7 +22,7 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
-    learn_body = False
+    learn_body = True
     select_body_manually = True
     generate_full_body_textures = True
     # ------------ SMPLX ------------
@@ -40,9 +40,11 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # Select identity images
+    # The identity images must be stored in smplx-deca/decaTestSAmples/examples
     identities = utils.input_identities(['IMG_0392_inputs.jpg'])
 
     # Select expression images
+    # The expression images must be stored in smplx-deca/decaTestSAmples/exp
     expressions = utils.input_expressions(['7.jpg'])
 
     # Select bodies
@@ -65,8 +67,11 @@ def main(args):
     # Select genders
     genders = ['male', 'neutral']
 
+
+    # Open visor3D to select body if desired
     if select_body_manually:
         import run_ui
+        # Exports betas selected in 3D viewer
         body_shapes, smpl_expression = run_ui.run_ui()
         for idx in range(len(genders)):
             genders[idx] = 'neutral'
@@ -157,7 +162,7 @@ def main(args):
         cv2.imwrite(os.path.join(savefolder, name, 'deca_head/animation.jpg'), deca.visualize(id_visdict))
 
         transfer_opdict['uv_texture_gt'] = id_opdict['uv_texture_gt']
-        if args.saveDepth or args.saveKpt or args.saveObj or args.saveMat or args.saveImages:
+        if args.saveObj:
             os.makedirs(os.path.join(savefolder, name, 'deca_head/reconstruction'), exist_ok=True)
             os.makedirs(os.path.join(savefolder, name, 'deca_head/animation'), exist_ok=True)
 
@@ -304,31 +309,13 @@ def main(args):
         # --------------------------- SAVE MODELS ---------------------------
         for save_type in ['reconstruction', 'animation']:
 
-            # Save DECA head
-            if save_type == 'reconstruction':
-                visdict = id_codedict;
-                opdict = id_opdict
-            else:
-                visdict = transfer_visdict;
-                opdict = transfer_opdict
-            if args.saveDepth:
-                depth_image = deca.render.render_depth(opdict['trans_verts']).repeat(1, 3, 1, 1)
-                visdict['depth_images'] = depth_image
-                cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_depth.jpg'), util.tensor2image(depth_image[0]))
+            # Save DECA model
+            opdict = id_opdict if save_type == 'reconstruction' else transfer_opdict
             if args.saveObj:
                 deca.save_obj(os.path.join(savefolder, name + '/deca_head', save_type, name + '.obj'), opdict)
-            if args.saveMat:
-                opdict = util.dict_tensor2npy(opdict)
-                from scipy.io import savemat
-                savemat(os.path.join(savefolder, name, save_type, name + '.mat'), opdict)
-            if args.saveImages:
-                for vis_name in ['inputs', 'rendered_images', 'albedo_images', 'shape_images', 'shape_detail_images']:
-                    if vis_name not in visdict.keys():
-                        continue
-                    cv2.imwrite(os.path.join(savefolder, name, save_type, name + '_' + vis_name + '.jpg'), util.tensor2image(visdict[vis_name][0]))
-            # -----------------------------------------------------
 
-            # Full body model saving
+
+            # Save SMPLX model
             if args.saveObj:
                 # Check if needed directories exist
                 os.makedirs(os.path.join(savefolder, name, 'body_models'), exist_ok=True)
@@ -350,11 +337,9 @@ def main(args):
                                        texture=smplx_albedo_tex, normal_map=smplx_normal_map_tex,
                                        uvcoords=smplx_uv_coords, uvfaces=smplx_uv_faces)
                 if os.path.exists(save_path):
-                    print(f'Successfully saved {save_path}')
+                    print(f'Successfully saved in {save_path}')
                 else:
-                    print(f'Error: Failed to save {save_path}')
-
-
+                    print(f'Error: Failed to save in {save_path}')
 
 
 
@@ -363,15 +348,14 @@ if __name__ == '__main__':
     # DECA RELATIVE
     parser = argparse.ArgumentParser(description='DECA: Detailed Expression Capture and Animation')
 
-    parser.add_argument('-i', '--image_path', default='TestSamples/examples/IMG_0392_inputs.jpg', type=str,
-                        help='path to input image')
-    parser.add_argument('-e', '--exp_path', default='TestSamples/exp/7.jpg', type=str,
-                        help='path to expression')
+    # device option
     parser.add_argument('--device', default='cuda', type=str,
                         help='set device, cpu for using cpu')
+
     # rendering option
     parser.add_argument('--rasterizer_type', default='standard', type=str,
                         help='rasterizer type: pytorch3d or standard')
+
     # process test images
     parser.add_argument('--extractTex', default=True, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to extract texture from input image as the uv texture map, set false if you want albeo map from FLAME mode')
@@ -383,18 +367,8 @@ if __name__ == '__main__':
     parser.add_argument('--useTex', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to use FLAME texture model to generate uv texture map, \
                             set it to True only if you downloaded texture model')
-    parser.add_argument('--saveVis', default=True, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to save visualization of output')
-    parser.add_argument('--saveKpt', default=False, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to save 2D and 3D keypoints')
-    parser.add_argument('--saveDepth', default=False, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to save depth image')
     parser.add_argument('--saveObj', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to save outputs as .obj')
-    parser.add_argument('--saveMat', default=False, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to save outputs as .mat')
-    parser.add_argument('--saveImages', default=False, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to save visualization output as seperate images')
 
     # SMPLX RELATIVE
     parser.add_argument('--model_folder', required=True, type=str,

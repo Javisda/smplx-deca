@@ -154,6 +154,9 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
     return best_alignment_checkpoint
 
 def learn_body_from_head(head, smpl_model, head_idxs):
+
+    print("Body inference")
+
     # 1º Get head shape to learn body from
     head_shape = head
 
@@ -222,9 +225,9 @@ def learn_body_from_head(head, smpl_model, head_idxs):
         writer.add_scalar('Training loss', loss, global_step=step)
         step += 1
 
-    print("Best Betas: ", [beta.item() for beta in best_betas[0]])
-    print("Mejor loss: {}", best_error)
-
+    print("Best Betas: ", [round(beta.item(), 5) for beta in best_betas[0]])
+    print("Mejor loss: {}", round(best_error, 5))
+    print("End body inference")
     return best_betas
 
 def input_identities(names_of_identities):
@@ -278,9 +281,9 @@ def flame_smplx_texture_combine(flame_obj,
         smplx_obj, flame_obj, smplx_flame_vertex_ids)
 
     #
-    flame_texture = cv2.resize(flame_texture, [1024, 1024])
+    flame_texture = cv2.resize(flame_texture, [512, 512])
     smplx_texture = cv2.imread(smplx_texture)
-    smplx_texture = cv2.resize(smplx_texture, [2048, 2048])
+    smplx_texture = cv2.resize(smplx_texture, [1024, 1024])
 
     f_h, f_w, _ = flame_texture.shape
     s_h, s_w, _ = smplx_texture.shape
