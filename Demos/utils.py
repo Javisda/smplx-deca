@@ -271,8 +271,9 @@ def flame_smplx_texture_combine(flame_obj,
                                 flame_texture,
                                 smplx_texture,
                                 smplx_flame_vertex_ids):
-
+    # import functions
     from uv_mixing_utils import get_smplx_flame_crossrespondence_face_ids, affine_transform
+
     flame_2_smplx_uv_ids, smplx_faces, smplx_uv, flame_faces, flame_uv = get_smplx_flame_crossrespondence_face_ids(
         smplx_obj, flame_obj, smplx_flame_vertex_ids)
 

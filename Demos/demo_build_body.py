@@ -290,10 +290,16 @@ def main(args):
             smplx_albedo_tex, smplx_normal_map_tex = utils.generate_flame_to_smplx_fitting_textures(corr_fname,
                                                                                                     albedo_flame_tex,
                                                                                                     normal_map_flame_tex)
+
+            # Even tho these lines of code are not related with the tex generations, the extraction of these
+            # data is needed for later, if generate_full_body_textures is desired.
             from uv_mixing_utils import read_uv_faces_id_from_obj, read_uv_coordinates_from_obj
-            # smplx-addon.obj is a template smplx .obj that holds uv coords and uv faces, key for this step
+            # smplx-addon.obj is a template smplx .obj that holds uv coords and uv faces, key for this step.
+            # This data is not kept inside the smpl object, so that`s why an external source is used.
             smplx_uv_coords = read_uv_coordinates_from_obj("UV_mixing_resources/smplx-addon.obj")
             smplx_uv_faces = read_uv_faces_id_from_obj("UV_mixing_resources/smplx-addon.obj")
+
+
 
         # --------------------------- SAVE MODELS ---------------------------
         for save_type in ['reconstruction', 'animation']:
