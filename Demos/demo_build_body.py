@@ -41,7 +41,7 @@ def main(args):
 
     # Select identity images
     # The identity images must be stored in smplx-deca/decaTestSAmples/examples
-    identities = utils.input_identities(['IMG_0392_inputs.jpg'])
+    identities = utils.input_identities(['Javi2.jpg'])
 
     # Select expression images
     # The expression images must be stored in smplx-deca/decaTestSAmples/exp

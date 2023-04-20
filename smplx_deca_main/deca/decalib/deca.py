@@ -297,6 +297,18 @@ class DECA(nn.Module):
         vertices = opdict['verts'][i].cpu().numpy()
         faces = self.render.faces[0].cpu().numpy()
         texture = util.tensor2image(opdict['uv_texture_gt'][i])
+
+        # OPTIONAL FEATURE // NOT AUTOMATED
+        # --- These functions are utils that helps to fill dark areas in deca decoded images ---
+        # --- These function parameters are unique for every input sample, so it's not automated by now ---
+        # --- Just an optional feature ---
+        # repairArea fills with color a selected area that are missing pixels
+        # from Demos.utils import repairArea, viewArea
+        #texture = repairArea(texture, x_low_limit=40, x_high_limit=206, y_low_limit=30, y_high_limit=80)
+        # viewArea helps visualize the area that must be selected in repairArea
+        #texture = viewArea(texture, x_low_limit=40, x_high_limit=206, y_low_limit=30, y_high_limit=80)
+        # --- Just uncomment the repairArea function or the viewArea function ---
+
         uvcoords = self.render.raw_uvcoords[0].cpu().numpy()
         uvfaces = self.render.uvfaces[0].cpu().numpy()
         # save coarse mesh, with texture and normal map
