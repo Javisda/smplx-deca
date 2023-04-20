@@ -4,6 +4,7 @@ import numpy as np
 import open3d as o3d
 import os
 import cv2
+from PIL import Image
 
 def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None, head_color=None):
     if visualize is False or (len(mesh_vertices) != len(mesh_faces)):
@@ -269,7 +270,62 @@ def pose_model():
 
     return body_pose
 
-def flame_smplx_texture_combine(flame_obj,
+# TODO: Precalculate this transformations
+def generate_mixed_uvs(correspondences_path):
+    from uv_mixing_utils import get_smplx_flame_crossrespondence_face_ids, read_uv_coordinates_from_obj
+
+    flame_2_smplx_uv_ids, smplx_faces, smplx_uv, flame_faces, flame_uv = get_smplx_flame_crossrespondence_face_ids(
+        "UV_mixing_resources/smplx-addon.obj", "UV_mixing_resources/head_template.obj", correspondences_path, None)
+
+    smplx_uv = read_uv_coordinates_from_obj("UV_mixing_resources/smplx-addon.obj")
+    smplx_uv[:, 0] = smplx_uv[:, 0] * 0.5  # new body uv coords
+
+    for id in flame_2_smplx_uv_ids.keys():
+        f_uv_id = id
+        s_uv_id = flame_2_smplx_uv_ids[id]
+
+        flame_idx = flame_faces[f_uv_id]
+        smplx_idx = smplx_faces[s_uv_id]
+
+        smplx_uv[smplx_idx, 1] = 1 - flame_uv[flame_idx, 1]
+        smplx_uv[smplx_idx, 0] = (flame_uv[flame_idx, 0] * 0.5) + 0.5
+
+    return smplx_uv
+
+
+def generate_mixed_textures(flame_tex_path):
+
+    # Read RGB to Image format
+    flame_texture = Image.open(flame_tex_path)
+    smplx_texture = Image.open("UV_mixing_resources/smplx_texture_m_alb.png")
+
+    # Select same resolution for both images
+    width, height = 4096, 4096
+
+    # Resize to the same resolution so they can be combines
+    smplx_texture = smplx_texture.resize((width, height))
+    flame_texture = flame_texture.resize((width, height))
+
+    # Create a new image with the size of both images combined
+    merged_image = Image.new("RGB", (width * 2, height))
+    merged_image.paste(smplx_texture, (0, 0))
+    merged_image.paste(flame_texture, (width, 0))
+
+    # Save the merged image
+    # merged_image.save('merged_smplx.png')
+
+    return merged_image
+
+
+
+
+
+
+
+
+
+# --------------- Deprecated -----------------
+def flame_smplx_texture_combine_deprecated(flame_obj,
                                 smplx_obj,
                                 flame_texture,
                                 smplx_texture,
@@ -312,7 +368,7 @@ def flame_smplx_texture_combine(flame_obj,
 
     return smplx_texture
 
-def generate_flame_to_smplx_fitting_textures(correspondences, flame_albedo, flame_normal_map):
+def generate_flame_to_smplx_fitting_textures_deprecated(correspondences, flame_albedo, flame_normal_map):
 
     # Resources
     smplx_obj = "UV_mixing_resources/smplx-addon.obj"
@@ -324,7 +380,7 @@ def generate_flame_to_smplx_fitting_textures(correspondences, flame_albedo, flam
 
     # Parallelization to get normal map and albedo textures
     def test(texture):
-        out_img = flame_smplx_texture_combine(flame_obj, smplx_obj, texture,
+        out_img = flame_smplx_texture_combine_deprecated(flame_obj, smplx_obj, texture,
                                               smplx_albedo_texture, smplx_2_flame_correspondences)
         return out_img
 

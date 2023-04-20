@@ -22,9 +22,9 @@ def main(args):
     # --------------------------- MODELS INIT PARAMS ---------------------------
     show_meshes = True
     use_renderer = True
-    learn_body = False
-    select_body_manually = True
-    generate_full_body_textures = True
+    learn_body = True
+    select_body_manually = False
+    
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -288,22 +288,12 @@ def main(args):
         print('Joints shape (SMPLX) =', smpl_joints_body.shape)
 
 
-        # ------------------------ UV MIXING TEXTURES------------------------
-        if generate_full_body_textures:
-            albedo_flame_tex = util.tensor2image(id_opdict['uv_texture_gt'][0])
-            normal_map_flame_tex = util.tensor2image(id_opdict['uv_detail_normals'][0] * 0.5 + 0.5)
-            smplx_albedo_tex, smplx_normal_map_tex = utils.generate_flame_to_smplx_fitting_textures(corr_fname,
-                                                                                                    albedo_flame_tex,
-                                                                                                    normal_map_flame_tex)
-
-            # Even tho these lines of code are not related with the tex generations, the extraction of these
-            # data is needed for later, if generate_full_body_textures is desired.
-            from uv_mixing_utils import read_uv_faces_id_from_obj, read_uv_coordinates_from_obj
-            # smplx-addon.obj is a template smplx .obj that holds uv coords and uv faces, key for this step.
-            # This data is not kept inside the smpl object, so that`s why an external source is used.
-            smplx_uv_coords = read_uv_coordinates_from_obj("UV_mixing_resources/smplx-addon.obj")
-            smplx_uv_faces = read_uv_faces_id_from_obj("UV_mixing_resources/smplx-addon.obj")
-
+        # ---------------------------- UV MIXING ----------------------------
+        # Generate new uv coords for mixed textures. (Mixed textures are computed further)
+        smplx_uv_coords = utils.generate_mixed_uvs(corr_fname)
+        # Read uv faces for model saving
+        from uv_mixing_utils import read_uv_faces_id_from_obj
+        smplx_uv_faces = read_uv_faces_id_from_obj("UV_mixing_resources/smplx-addon.obj")
 
 
         # --------------------------- SAVE MODELS ---------------------------
@@ -322,19 +312,27 @@ def main(args):
                 os.makedirs(os.path.join(savefolder, name, 'textured_body_models'), exist_ok=True)
                 # Create model root path
                 save_path = os.path.join(savefolder, name)
+
+                # ------Create mixed textures-----
+                albedo_flame_tex = os.path.join(savefolder, name + '/deca_head', save_type, name + '.png')
+                normals_flame_tex = os.path.join(savefolder, name + '/deca_head', save_type, name + '_normals.png')
+                # Convert from PIL Image format to ndarray -> usage of np.asarray
+                # PIL stores color as RGB and numpy as BGR. [:, :, ::-1] is to swap those channels.
+                full_albedo_tex = np.asarray(utils.generate_mixed_textures(albedo_flame_tex))[:, :, ::-1]
+                full_normals_tex = np.asarray(utils.generate_mixed_textures(normals_flame_tex))[:, :, ::-1]
+                # ------
+
                 if save_type == 'reconstruction':
                     utils.save_obj(os.path.join(save_path, 'body_models', 'normal_model.obj'), smpl_vertices_no_expression, smpl_model.faces)
                     utils.visualize_meshes([smpl_vertices_no_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
-                    if generate_full_body_textures:
-                        util.write_obj(os.path.join(save_path, 'textured_body_models', 'normal_model.obj'), smpl_vertices_no_expression, smpl_model.faces,
-                                       texture=smplx_albedo_tex, normal_map=smplx_normal_map_tex,
+                    util.write_obj(os.path.join(save_path, 'textured_body_models', 'normal_model.obj'), smpl_vertices_no_expression, smpl_model.faces,
+                                       texture=full_albedo_tex, normal_map=full_normals_tex,
                                        uvcoords=smplx_uv_coords, uvfaces=smplx_uv_faces)
                 else:
                     utils.save_obj(os.path.join(save_path, 'body_models', 'exp_' + name_exp + '.obj'), smpl_vertices_expression, smpl_model.faces)
                     utils.visualize_meshes([smpl_vertices_expression], [smpl_model.faces], visualize=show_meshes, head_idxs=head_idxs, head_color=head_color)
-                    if generate_full_body_textures:
-                        util.write_obj(os.path.join(save_path, 'textured_body_models', 'exp_' + name_exp + '.obj'), smpl_vertices_expression, smpl_model.faces,
-                                       texture=smplx_albedo_tex, normal_map=smplx_normal_map_tex,
+                    util.write_obj(os.path.join(save_path, 'textured_body_models', 'exp_' + name_exp + '.obj'), smpl_vertices_expression, smpl_model.faces,
+                                       texture=full_albedo_tex, normal_map=full_normals_tex,
                                        uvcoords=smplx_uv_coords, uvfaces=smplx_uv_faces)
                 if os.path.exists(save_path):
                     print(f'Successfully saved in {save_path}')
