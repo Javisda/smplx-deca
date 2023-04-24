@@ -303,11 +303,14 @@ class DECA(nn.Module):
         # --- These function parameters are unique for every input sample, so it's not automated by now ---
         # --- Just an optional feature ---
         # repairArea fills with color a selected area that are missing pixels
-        # from Demos.utils import repairArea, viewArea
+        from Demos.fill_texture_utils import repairArea, viewArea, select_face_borders
         #texture = repairArea(texture, x_low_limit=40, x_high_limit=206, y_low_limit=30, y_high_limit=80)
         # viewArea helps visualize the area that must be selected in repairArea
         #texture = viewArea(texture, x_low_limit=40, x_high_limit=206, y_low_limit=30, y_high_limit=80)
         # --- Just uncomment the repairArea function or the viewArea function ---
+
+        # Fill borders and make look head texture less stitching
+        texture = select_face_borders(texture)
 
         uvcoords = self.render.raw_uvcoords[0].cpu().numpy()
         uvfaces = self.render.uvfaces[0].cpu().numpy()
