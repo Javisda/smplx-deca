@@ -36,7 +36,7 @@ def visualize_meshes(mesh_vertices, mesh_faces, visualize=False, head_idxs=None,
 
 def head_smoothing(deca_head, smplx_head, head_idx):
     # Weight loading
-    abs_path = os.path.abspath('Neck_masks/mask_1')
+    abs_path = os.path.abspath('Neck_masks/smoothing_mask_1')
     weights = np.fromfile(abs_path, 'float32')
 
     # Calculations
@@ -317,7 +317,30 @@ def generate_mixed_textures(flame_tex_path):
     return merged_image
 
 
+def neck_smoothing_for_textures(smplx_body):
 
+    #  Index mapping
+    #  3218 -> 3936  #  3219 -> 3937  #  3236 -> 3239  #  3237 -> 3238  #  3329 -> 3939  #  3330 -> 3938
+    #  4427 -> 4429  #  4428 -> 3376  #  4436 -> 4434  #  4437 -> 3378  #  4438 -> 3379  #  5350 -> 3831
+    #  5450 -> 5656  #  5453 -> 3941  #  5454 -> 3942  #  5533 -> 5621  #  5981 -> 6684  #  5982 -> 6685
+    #  5999 -> 6002  #  6000 -> 6001  #  6092 -> 6687  #  6093 -> 6686  #  7163 -> 7165  #  7164 -> 6137
+    #  7172 -> 7170  #  7173 -> 6139  #  7174 -> 6140  #  8184 -> 8350  #  8187 -> 6689  #  8188 -> 6690
+
+    outer_idxs = [3218, 3219, 3236, 3237, 3329, 3330, 4427, 4428, 4436, 4437,
+                  4438, 5350, 5450, 5453, 5454, 5533, 5981, 5982, 5999, 6000,
+                  6092, 6093, 7163, 7164, 7172, 7173, 7174, 8184, 8187, 8188]
+    inner_idxs = [3936, 3937, 3239, 3238, 3939, 3938, 4429, 3376, 4434, 3378,
+                  3379, 3831, 5656, 3941, 3942, 5621, 6684, 6685, 6002, 6001,
+                  6687, 6686, 7165, 6137, 7170, 6139, 6140, 8350, 6689, 6690]
+    for o_to_i in range(len(outer_idxs)):
+        # Finds the mid-point between 2 vertices (from the mapping)
+        new_mixed_coords = smplx_body[outer_idxs[o_to_i]] * 0.5 + smplx_body[inner_idxs[o_to_i]] * 0.5
+
+        # Apply new position to both vertices
+        smplx_body[outer_idxs[o_to_i]] = new_mixed_coords
+        smplx_body[inner_idxs[o_to_i]] = new_mixed_coords
+
+    return smplx_body
 
 
 
@@ -396,3 +419,4 @@ def generate_flame_to_smplx_fitting_textures_deprecated(correspondences, flame_a
                        (tex) for tex in [flame_albedo_texture, flame_normal_map_texture])
 
     return textures
+
