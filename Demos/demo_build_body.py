@@ -20,11 +20,11 @@ import utils
 def main(args):
 
     # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = True
+    show_meshes = False
     use_renderer = True
     learn_body = True
     select_body_manually = False
-    
+
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -45,7 +45,7 @@ def main(args):
 
     # Select expression images
     # The expression images must be stored in smplx-deca/decaTestSAmples/exp
-    expressions = utils.input_expressions(['7.jpg'])
+    expressions = utils.input_expressions(['5.jpg'])
 
     # Select bodies
     smpl_betas_1 = torch.tensor([0.3776465356349945,
@@ -257,6 +257,10 @@ def main(args):
             # 1º Replace smplx head for deca head and smooth neck.
         smplx_body = smpl_output['v_shaped'].squeeze(dim=0)
         smplx_body[head_idxs] = utils.head_smoothing(head_vertices_no_expression.float(), smplx_body[head_idxs], head_idx=head_idxs) # Comment this to get the smplx body with the head that best matches deca head
+
+        # ---------------- NECK BORDER SMOOTHING FOR TEXTURES ---------------
+        smplx_body = utils.neck_smoothing_for_textures(smplx_body)
+
         smpl_model.v_template = smplx_body
             # 2º Do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
         smpl_betas_zeros = torch.zeros([1, 10], dtype=torch.float32)
@@ -264,14 +268,16 @@ def main(args):
                        global_orient=global_orient,
                        body_pose=body_pose,
                        transl=global_position)
-
         smpl_vertices_no_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
         smpl_joints_body = smpl_output.joints.detach().cpu().numpy().squeeze()
-
 
         # GENERATE MODEL WITH EXPRESSION
              # 1º Replace smplx head for deca head and smooth neck.
         smplx_body[head_idxs] = utils.head_smoothing(head_vertices_expression.float(), smplx_body[head_idxs], head_idx=head_idxs)
+
+        # ---------------- NECK BORDER SMOOTHING FOR TEXTURES ---------------
+        smplx_body = utils.neck_smoothing_for_textures(smplx_body)
+
         smpl_model.v_template = smplx_body
             # 2º Do another forward pass to get final model rotated, posed and translated. Reseting betas to zero is key.
         smpl_output = smpl_model(betas=smpl_betas_zeros, expression=smpl_expression,
@@ -279,7 +285,6 @@ def main(args):
                        body_pose=body_pose,
                        transl=global_position)
         smpl_vertices_expression = smpl_output.vertices.detach().cpu().numpy().squeeze()
-
 
 
 
@@ -294,6 +299,7 @@ def main(args):
         # Read uv faces for model saving
         from uv_mixing_utils import read_uv_faces_id_from_obj
         smplx_uv_faces = read_uv_faces_id_from_obj("UV_mixing_resources/smplx-addon.obj")
+
 
 
         # --------------------------- SAVE MODELS ---------------------------
