@@ -102,11 +102,11 @@ def get_mesh_root(mesh):
     return root
 def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, max_iters_without_improvement=20):
 
+    # Check input integrity
     if not torch.is_tensor(mesh1):
         mesh1 = torch.from_numpy(mesh1)
     if not torch.is_tensor(mesh2):
         mesh2 = torch.from_numpy(mesh2)
-
 
     # Get initial roots
     root1 = get_mesh_root(mesh1)
@@ -147,16 +147,15 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
 
         # Check if optimization isn't improving for a number of steps
         if (current_iter_without_improvement == max_iters_without_improvement) or (step == (max_iters - 1)):
-            print("Total iterations of improvement: " + str(step))
             break
 
     coords_to_optimize.requires_grad = False
     # Return optimized mesh1
-    return best_alignment_checkpoint
+    return best_alignment_checkpoint, step
 
 def learn_body_from_head(head, smpl_model, head_idxs):
 
-    print("Body inference")
+    print("-> Body inference")
 
     # 1º Get head shape to learn body from
     head_shape = head
@@ -226,9 +225,9 @@ def learn_body_from_head(head, smpl_model, head_idxs):
         writer.add_scalar('Training loss', loss, global_step=step)
         step += 1
 
-    print("Best Betas: ", [round(beta.item(), 5) for beta in best_betas[0]])
-    print("Mejor loss: {}", round(best_error, 5))
-    print("End body inference")
+    print("-> Best Betas: ", [round(beta.item(), 5) for beta in best_betas[0]])
+    print("-> Mejor loss: {}", round(best_error, 5))
+    print("-> End body inference")
     return best_betas
 
 def input_identities(names_of_identities):
@@ -270,7 +269,7 @@ def pose_model():
 
     return body_pose
 
-# TODO: Precalculate this transformations
+
 def generate_mixed_uvs(correspondences_path):
     from uv_mixing_utils import get_smplx_flame_crossrespondence_face_ids, read_uv_coordinates_from_obj
 
@@ -342,81 +341,24 @@ def neck_smoothing_for_textures(smplx_body):
 
     return smplx_body
 
+def head_rescale(head_to_reshape, smpl_head, faces):
+    from torch.nn import Parameter
 
+    s = torch.tensor([1], requires_grad=True, dtype=torch.float)
+    model = [Parameter(s)]
+    lr = 0.002
+    optimizer = torch.optim.Adam(model, lr=lr)
 
+    head_to_reshape = head_to_reshape.detach()
+    smpl_head = smpl_head.detach()
 
+    #visualize_meshes([head_to_reshape, smpl_head], [faces, faces], visualize=True)
+    for epoch in range(1000):
+        optimizer.zero_grad()
+        loss = (head_to_reshape * model[0] - smpl_head).pow(2).sum()
+        loss.backward(retain_graph=True)
+        optimizer.step()
+    #visualize_meshes([head_to_reshape * model[0], smpl_head], [faces, faces], visualize=True)
 
-
-
-
-
-
-
-
-# --------------- DEPRECATED -----------------
-def flame_smplx_texture_combine_deprecated(flame_obj,
-                                smplx_obj,
-                                flame_texture,
-                                smplx_texture,
-                                smplx_flame_vertex_ids):
-    # import functions
-    from uv_mixing_utils import get_smplx_flame_crossrespondence_face_ids, affine_transform
-
-    flame_2_smplx_uv_ids, smplx_faces, smplx_uv, flame_faces, flame_uv = get_smplx_flame_crossrespondence_face_ids(
-        smplx_obj, flame_obj, smplx_flame_vertex_ids)
-
-    #
-    flame_texture = cv2.resize(flame_texture, [512, 512])
-    smplx_texture = cv2.imread(smplx_texture)
-    smplx_texture = cv2.resize(smplx_texture, [1024, 1024])
-
-    f_h, f_w, _ = flame_texture.shape
-    s_h, s_w, _ = smplx_texture.shape
-
-    flame_uv[:, 1] *= f_h
-    flame_uv[:, 0] *= f_w
-    flame_uv = flame_uv.astype(np.int)
-
-    smplx_uv[:, 1] *= s_h
-    smplx_uv[:, 0] *= s_w
-    smplx_uv = smplx_uv.astype(np.int)
-
-    import tqdm
-    for id in tqdm.tqdm(flame_2_smplx_uv_ids.keys()):
-        f_uv_id = id
-        s_uv_id = flame_2_smplx_uv_ids[id]
-
-        flame_idx = flame_faces[f_uv_id]
-        smplx_idx = smplx_faces[s_uv_id]
-
-        flame_p = flame_uv[flame_idx]
-        smplx_p = smplx_uv[smplx_idx]
-        smplx_texture = affine_transform(flame_p, smplx_p, flame_texture, smplx_texture)
-
-    smplx_texture = cv2.medianBlur(smplx_texture, 11)
-
-    return smplx_texture
-
-def generate_flame_to_smplx_fitting_textures_deprecated(correspondences, flame_albedo, flame_normal_map):
-
-    # Resources
-    smplx_obj = "UV_mixing_resources/smplx-addon.obj"
-    flame_obj = "UV_mixing_resources/head_template.obj"
-    smplx_2_flame_correspondences = correspondences
-    smplx_albedo_texture = "UV_mixing_resources/smplx_texture_m_alb.png"
-    flame_albedo_texture = flame_albedo
-    flame_normal_map_texture = flame_normal_map
-
-    # Parallelization to get normal map and albedo textures
-    def test(texture):
-        out_img = flame_smplx_texture_combine_deprecated(flame_obj, smplx_obj, texture,
-                                              smplx_albedo_texture, smplx_2_flame_correspondences)
-        return out_img
-
-    from joblib import Parallel, delayed
-
-    textures = Parallel(n_jobs=2, backend="loky", verbose=0)(delayed(test)
-                       (tex) for tex in [flame_albedo_texture, flame_normal_map_texture])
-
-    return textures
-
+    # return the scaling factor
+    return model[0]
