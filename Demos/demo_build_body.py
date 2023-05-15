@@ -17,14 +17,9 @@ from smplx_deca_main.smplx.smplx import body_models as smplx
 
 import utils
 
-def main(args):
+def main(args, show_meshes = False, use_renderer = True, learn_body = False, select_body_manually = False):
 
-    # --------------------------- MODELS INIT PARAMS ---------------------------
-    show_meshes = False
-    use_renderer = True
-    learn_body = True
-    select_body_manually = False
-
+    # --------- MODELS INIT ----------
     # ------------ SMPLX ------------
     model_folder = osp.expanduser(osp.expandvars(args.model_folder))
     corr_fname = args.corr_fname
@@ -39,33 +34,45 @@ def main(args):
     device = args.device
     os.makedirs(savefolder, exist_ok=True)
 
+    deca_cfg.model.extract_tex = args.extractTex
+    deca_cfg.model.use_tex = args.useTex
+    deca_cfg.rasterizer_type = args.rasterizer_type
+    deca = DECA(config=deca_cfg, device=device, use_renderer=use_renderer)
+
+    # ----- DATASET INIT -----
     # Select identity images
     # The identity images must be stored in smplx-deca/decaTestSAmples/examples
-    identities = utils.input_identities(['Javi2.jpg'])
+    identities = utils.input_identities(['Javi.jpg', 'brendan_fraser.png',
+                                         'keanu_reeves.png', 'jamie_foxx.png',
+                                         'anne_mcclain.png', 'uma_thurman.png',
+                                         'meryl_streep.png', 'sydney_sweeney.png'])
 
     # Select expression images
     # The expression images must be stored in smplx-deca/decaTestSAmples/exp
-    expressions = utils.input_expressions(['5.jpg'])
+    expressions = utils.input_expressions(['0.jpg', '1.jpg', '2.jpg', '3.jpg',
+                                           '4.jpg', '5.jpg', '6.jpg', '8.jpg'])
 
     # Select bodies
-    smpl_betas_1 = torch.tensor([0.3776465356349945,
-                                -1.1383668184280396,
-                                 3.765796422958374,
-                                -3.6816511154174805,
-                                -1.0226212739944458,
-                                -3.976848602294922,
-                                -4.116629123687744,
-                                 1.602636456489563,
-                                -1.5878002643585205,
-                                -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
-    smpl_betas_1 = torch.randn([1, 10], dtype=torch.float32)
-    smpl_betas_2 = torch.ones([1, 10], dtype=torch.float32) * (-1)
     body_shapes = []
-    body_shapes.append(smpl_betas_1)
-    body_shapes.append(smpl_betas_2)
+    if select_body_manually is not True or \
+                 learn_body is not True:
+        smpl_betas_1 = torch.tensor([0.3776465356349945,
+                                    -1.1383668184280396,
+                                     3.765796422958374,
+                                    -3.6816511154174805,
+                                    -1.0226212739944458,
+                                    -3.976848602294922,
+                                    -4.116629123687744,
+                                     1.602636456489563,
+                                    -1.5878002643585205,
+                                    -1.6307952404022217], dtype=torch.float32).unsqueeze(0)
+        smpl_betas_1 = torch.randn([1, 10], dtype=torch.float32)
+        smpl_betas_2 = torch.ones([1, 10], dtype=torch.float32) * (-1)
+        body_shapes.append(smpl_betas_1)
+        body_shapes.append(smpl_betas_2)
 
     # Select genders
-    genders = ['male', 'neutral']
+    genders = ['male', 'male', 'male', 'male', 'female', 'female', 'female', 'female']
 
 
     # Open visor3D to select body if desired
@@ -90,11 +97,14 @@ def main(args):
                       "Remember to export the same amount of betas as identity images are.")
 
     for j in range(len(identities)):
-
         # Sample params
         identity_path = identities[j]
         expression_path = expressions[j]
-        body_shape_parameters = body_shapes[j]
+        if len(body_shapes) > 0:
+            body_shape_parameters = body_shapes[j]
+        else:
+            body_shape_parameters = torch.zeros([1, 10], dtype=torch.float32)
+
         gender = genders[j]
         smpl_expression = smpl_expressions[j] if select_body_manually else torch.zeros([1, 10], dtype=torch.float32)
 
@@ -102,6 +112,7 @@ def main(args):
         testdata = datasets.TestData(identity_path, iscrop=args.iscrop, face_detector=args.detector)
         expdata = datasets.TestData(expression_path, iscrop=args.iscrop, face_detector=args.detector)
 
+        print("***** Calculating " + os.path.basename(os.path.splitext(identity_path)[0]) + " model *****")
 
         # ------------ CREATE SMPLX MODEL ------------w
         # Body Translation
@@ -120,15 +131,14 @@ def main(args):
         smpl_body_generated = smpl_output['v_shaped'].squeeze(dim=0)
 
         # ------------ CREATE DECA MODEL ------------
-        deca_cfg.model.extract_tex = args.extractTex
-        deca_cfg.model.use_tex = args.useTex
-        deca_cfg.rasterizer_type = args.rasterizer_type
-        deca = DECA(config=deca_cfg, device=device, use_renderer=use_renderer)
+        #deca_cfg.model.extract_tex = args.extractTex
+        #deca_cfg.model.use_tex = args.useTex
+        #deca_cfg.rasterizer_type = args.rasterizer_type
+        #deca = DECA(config=deca_cfg, device=device, use_renderer=use_renderer)
         # identity reference
-        id = 0
-        name = testdata[id]['imagename']
-        name_exp = expdata[id]['imagename']
-        images = testdata[id]['image'].to(device)[None, ...]
+        name = testdata[0]['imagename']
+        name_exp = expdata[0]['imagename']
+        images = testdata[0]['image'].to(device)[None, ...]
 
         # ------------ RUN DECA TO GENERATE HEAD MODELS ------------
         # Get dict to generate no expression head model
@@ -149,7 +159,7 @@ def main(args):
         # Get dict to generate expression head model
         # -- expression transfer
         # exp code from image
-        exp_images = expdata[id]['image'].to(device)[None, ...]
+        exp_images = expdata[0]['image'].to(device)[None, ...]
         with torch.no_grad():
             exp_codedict = deca.encode(exp_images)
 
@@ -179,6 +189,7 @@ def main(args):
 
 
         # 1º Calculate offsets between pairs of heads
+        print("-> Aligning models")
         generated_deca_head_no_expression = id_opdict['verts'].detach().clone()
         generated_deca_head_expression = transfer_opdict['verts'].detach().clone()
         deca_neutral_head = torch.from_numpy(deca_neutral_vertices)
@@ -187,6 +198,8 @@ def main(args):
         heads_to_align = [generated_deca_head_expression, generated_deca_head_no_expression, deca_neutral_head, smplx_neutral_head, generated_smplx_head]
         total_offset_no_expression = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
         total_offset_expression = torch.zeros_like(smplx_neutral_head, dtype=torch.float32)
+        # For debugging purposes
+        iters_of_improvement = []
         for i in range(len(heads_to_align) - 1):
             head_1 = heads_to_align[i]
             head_2 = heads_to_align[i + 1]
@@ -206,7 +219,7 @@ def main(args):
                                    visualize=False)
 
             # Better alignment raining loop
-            best_head_alignment = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=200)
+            best_head_alignment, steps = utils.optimize_head_alignment(head_1_aligned, head_2, max_iters=200)
 
             # Visualize second alignment after optimization
             utils.visualize_meshes([head_2, head_1_aligned], [generic_deca['f'], generic_deca['f']],
@@ -222,6 +235,10 @@ def main(args):
                 total_offset_expression += shape_offset_deca_and_smplx_neutrals.squeeze(0)
                 total_offset_no_expression += shape_offset_deca_and_smplx_neutrals.squeeze(0)
 
+            iters_of_improvement.append(steps)
+        print("-> Models aligned. Total iterations : ", [iter for iter in iters_of_improvement])
+
+
 
         # NORMAL HEAD (NO EXPRESSION)
             # 2º Select smplx shape
@@ -232,7 +249,8 @@ def main(args):
         smplx_head_with_offsets = smplx_head + total_offset_no_expression
             # 5º Replace vertices
         head_vertices_no_expression = smplx_head_with_offsets
-
+            # 6º Re-scale if body from selector. Testing, there is a bug.
+        # head_vertices_no_expression = utils.head_rescale(head_vertices_no_expression, smplx_head, generic_deca['f']) if select_body_manually else head_vertices_no_expression
 
         # EXPRESSION BODY
             # 2º Select smplx shape
@@ -245,7 +263,7 @@ def main(args):
         head_vertices_expression = smplx_head_with_offsets
 
 
-        # LEARN BODY FROM HEAD SHAPE
+        # INFERENCE BODY FROM HEAD SHAPE
         if learn_body:
             best_betas = utils.learn_body_from_head(head_vertices_no_expression, smpl_model, head_idxs)
             # Do a forward pass through the model to get body shape
@@ -289,8 +307,8 @@ def main(args):
 
 
         # --------------------------- OUTPUT INFO ---------------------------
-        print('Vertices shape (SMPLX) =', smpl_vertices_no_expression.shape)
-        print('Joints shape (SMPLX) =', smpl_joints_body.shape)
+        #print('Vertices shape (SMPLX) =', smpl_vertices_no_expression.shape)
+        #print('Joints shape (SMPLX) =', smpl_joints_body.shape)
 
 
         # ---------------------------- UV MIXING ----------------------------
@@ -395,5 +413,4 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--savefolder', default='TestSamples', type=str,
                         help='path to the output directory, where results(obj, txt files) will be stored.')
 
-
-    main(parser.parse_args())
+    main(parser.parse_args(), show_meshes=False, learn_body=True, select_body_manually=False)
