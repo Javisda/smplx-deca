@@ -1,0 +1,3 @@
+newmtl FaceTexture
+map_Kd exp_0.png
+disp TestSamples/IMG_0392_inputs/textured_body_models/exp_0_normals.png
