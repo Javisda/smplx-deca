@@ -32,6 +32,10 @@ from .datasets import datasets
 from .utils.config import cfg
 torch.backends.cudnn.benchmark = True
 
+import cv2
+from PIL import Image
+import torchvision.transforms as transforms
+
 class DECA(nn.Module):
     def __init__(self, config=None, device='cuda', use_renderer=False):
         super(DECA, self).__init__()
@@ -312,6 +316,9 @@ class DECA(nn.Module):
         # Fill borders and make look head texture less stitching
         texture = select_face_borders(texture)
 
+        # Adjust eye
+        texture = self.move_eye(texture)
+
         uvcoords = self.render.raw_uvcoords[0].cpu().numpy()
         uvfaces = self.render.uvfaces[0].cpu().numpy()
         # save coarse mesh, with texture and normal map
@@ -343,3 +350,82 @@ class DECA(nn.Module):
             'E_detail': self.E_detail.state_dict(),
             'D_detail': self.D_detail.state_dict()
         }
+
+    def move_eye(self, texture):
+
+        eye_mask_path = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')), 'deca', 'data', 'eye_mask.png')
+        mask = imread(eye_mask_path).astype(np.float32) / 255.
+        mask = torch.from_numpy(mask[:, :, 0])[None, None, :, :].contiguous().squeeze()
+
+
+        ideal_center_right_eye = [237, 19]  # 237, 19
+        ideal_center_left_eye = [18, 19]  # 18, 19
+        # texture[ideal_center_right_eye[1], ideal_center_right_eye[0], 0] = 255 # Paint ideal center
+        # texture[ideal_center_left_eye[1], ideal_center_left_eye[0], 0] = 255 # Paint ideal center
+
+        from Demos.EyeCenterNet import EyeCenterNet
+        eye_detector = EyeCenterNet()
+        abs_deca_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        path_to_checkpoint = os.path.join(abs_deca_dir, 'deca', 'data', 'eye_net_weights_version_2.pt')
+        eye_detector.load_state_dict(torch.load(path_to_checkpoint))
+        # Save image
+        cv2.imwrite('eyes.png', texture)
+        # Load image in the format we need
+        texture_to_net = Image.open('eyes.png')
+        transform = transforms.ToTensor()
+        texture_to_net = transform(texture_to_net).unsqueeze(dim=0)
+        # Delete saved image
+        if os.path.exists('eyes.png'):
+            os.remove('eyes.png')
+        right_eye_texture = texture_to_net[:, :, 0:40, 215:255]
+        left_eye_texture = texture_to_net[:, :, 0:40, 0:40]
+        predicted_right_eye_coords = eye_detector(right_eye_texture).squeeze().to(torch.int32)
+        predicted_left_eye_coords = eye_detector(left_eye_texture).squeeze().to(torch.int32)
+        #right_eye_texture[0, 0, predicted_right_eye_coords[1], predicted_right_eye_coords[0]] = 1.0
+        #left_eye_texture[0, 0, predicted_left_eye_coords[1], predicted_left_eye_coords[0]] = 1.0
+        #torchvision.utils.save_image(right_eye_texture, 'right_eye.png')
+        #torchvision.utils.save_image(left_eye_texture, 'left_eye.png')
+
+        # PROCESS RIGHT EYE
+        # center-to-center offset
+        x_offset = predicted_right_eye_coords[0] - ideal_center_right_eye[0] + (255 - 40)  # Positive value translates eye to the left
+        y_offset = ideal_center_right_eye[1] - predicted_right_eye_coords[1]  # Positive value translates eye to the bottom
+
+        texture_copy = np.copy(texture)
+        x_low_limit = 215;x_high_limit = 255;y_low_limit = 0;y_high_limit = 40
+        # Apply the translation to the eye region on a copy
+        for x in range(x_low_limit, x_high_limit):
+            for y in range(y_low_limit, y_high_limit):
+                if (y + y_offset > 0) and (x + x_offset < 255):
+                    texture_copy[y, x, :] = texture[y - y_offset, x + x_offset, :]
+
+        # Pass it to the original texture
+        mask = torch.tensor(mask)
+        a = torch.tensor(texture_copy[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :])
+        b = a * mask[y_low_limit:y_high_limit, x_low_limit:x_high_limit].unsqueeze(2)
+        c = torch.tensor(texture[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :])
+        d = (1 - mask[y_low_limit:y_high_limit, x_low_limit:x_high_limit].unsqueeze(2)) * c
+        e = b + d
+        texture[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :] = e
+
+        # PROCESS LEFT EYE
+        # center-to-center offset
+        x_offset = predicted_left_eye_coords[0] - ideal_center_left_eye[0]  # Positive value translates eye to the left
+        y_offset = ideal_center_left_eye[1] - predicted_left_eye_coords[1]  # Positive value translates eye to the bottom
+        texture_copy = np.copy(texture)
+        x_low_limit = 0;x_high_limit = 40;y_low_limit = 0;y_high_limit = 40
+        # Apply the translation to the eye region on a copy
+        for x in range(x_low_limit, x_high_limit):
+            for y in range(y_low_limit, y_high_limit):
+                if (y + y_offset > 0) and (x + x_offset < 255):
+                    texture_copy[y, x, :] = texture[y - y_offset, x + x_offset, :]
+        # Pass it to the original texture
+        mask = torch.tensor(mask)
+        a = torch.tensor(texture_copy[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :])
+        b = a * mask[y_low_limit:y_high_limit, x_low_limit:x_high_limit].unsqueeze(2)
+        c = torch.tensor(texture[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :])
+        d = (1 - mask[y_low_limit:y_high_limit, x_low_limit:x_high_limit].unsqueeze(2)) * c
+        e = b + d
+        texture[y_low_limit:y_high_limit, x_low_limit:x_high_limit, :] = e
+
+        return texture

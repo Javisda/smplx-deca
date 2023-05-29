@@ -42,15 +42,11 @@ def main(args, show_meshes = False, use_renderer = True, learn_body = False, sel
     # ----- DATASET INIT -----
     # Select identity images
     # The identity images must be stored in smplx-deca/decaTestSAmples/examples
-    identities = utils.input_identities(['Javi.jpg', 'brendan_fraser.png',
-                                         'keanu_reeves.png', 'jamie_foxx.png',
-                                         'anne_mcclain.png', 'uma_thurman.png',
-                                         'meryl_streep.png', 'sydney_sweeney.png'])
+    identities = utils.input_identities(['IMG_0392_inputs.jpg'])
 
     # Select expression images
     # The expression images must be stored in smplx-deca/decaTestSAmples/exp
-    expressions = utils.input_expressions(['0.jpg', '1.jpg', '2.jpg', '3.jpg',
-                                           '4.jpg', '5.jpg', '6.jpg', '8.jpg'])
+    expressions = utils.input_expressions(['0.jpg'])
 
     # Select bodies
     body_shapes = []
