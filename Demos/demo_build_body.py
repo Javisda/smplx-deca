@@ -54,7 +54,7 @@ def main(args, show_meshes = False, use_renderer = True, learn_body = False, sel
 
     # Select bodies
     body_shapes = []
-    if select_body_manually is not True or \
+    if select_body_manually is not True and \
                  learn_body is not True:
         smpl_betas_1 = torch.tensor([0.3776465356349945,
                                     -1.1383668184280396,
