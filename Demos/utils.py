@@ -122,6 +122,12 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
     best_loss = float("inf")
     current_iter_without_improvement = 0
     best_alignment_checkpoint = mesh1.clone()
+
+    # Tensorboard Initialization
+    from torch.utils.tensorboard import SummaryWriter
+    writer = SummaryWriter(f'tensorboard/tensorboard_test')
+    step = 0
+
     for step in range(max_iters):
         # Update mesh1 with new root
         mesh1[:, 0] += coords_to_optimize[0] - root1[0]
@@ -148,6 +154,10 @@ def optimize_head_alignment(mesh1, mesh2, step_size=0.00000001, max_iters=1000, 
         # Check if optimization isn't improving for a number of steps
         if (current_iter_without_improvement == max_iters_without_improvement) or (step == (max_iters - 1)):
             break
+
+        # Tensorboard writing
+        writer.add_scalar('Alignment loss', loss, global_step=step)
+        step += 1
 
     coords_to_optimize.requires_grad = False
     # Return optimized mesh1
@@ -222,7 +232,7 @@ def learn_body_from_head(head, smpl_model, head_idxs):
             best_betas = shape
 
         # Tensorboard writing
-        writer.add_scalar('Training loss', loss, global_step=step)
+        writer.add_scalar('Inference loss', loss, global_step=step)
         step += 1
 
     print("-> Best Betas: ", [round(beta.item(), 5) for beta in best_betas[0]])
@@ -267,6 +277,29 @@ def pose_model():
     # pelvis
     body_pose[0, 6:9] = create_local_rotation(x_degrees=0.0, y_degrees=0.0, z_degrees=0.0)
 
+    # Pose bailonga
+    """
+    body_pose[0, :3] = torch.tensor([-9.3395e-01,  9.3395e-01,  5.2840e-01])
+    body_pose[0, 3:6] = torch.tensor([-1.0614e+00, -3.1980e-01, -1.0741e-01])
+    body_pose[0, 6:9] = torch.tensor([ 1.7453e-02,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 9:12] = torch.tensor([ 1.2912e+00,  5.2683e-02,  1.0100e-01])
+    body_pose[0, 12:15] = torch.tensor([ 1.0689e+00, -1.8513e-01, -1.6646e-01])
+    body_pose[0, 15:18] = torch.tensor([ 1.7453e-02, -1.7453e-02,  1.5231e-04])
+    body_pose[0, 18:21] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 24:27] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 27:30] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 30:33] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 33:36] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 36:39] = torch.tensor([-1.7453e-02,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 39:42] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 42:45] = torch.tensor([ 0.0000e+00,  0.0000e+00,  0.0000e+00])
+    body_pose[0, 45:48] = torch.tensor([-5.8245e-01, -8.5476e-01, -3.5638e-01])
+    body_pose[0, 48:51] = torch.tensor([-8.1951e-01,  4.5561e-01, -2.6008e-03])
+    body_pose[0, 51:54] = torch.tensor([ 2.4878e-01, -6.6757e-01, -6.2474e-01])
+    body_pose[0, 54:57] = torch.tensor([-6.8098e-01,  4.9509e-01,  3.6645e-01])
+    body_pose[0, 57:60] = torch.tensor([-1.1781e+00, -4.4656e-01, -5.6757e-01])
+    body_pose[0, 60:63] = torch.tensor([ 6.7061e-01,  4.9157e-01,  4.6608e-01])
+    """
     return body_pose
 
 

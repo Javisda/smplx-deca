@@ -126,45 +126,64 @@ def train_model_version_2():
     ])
     dataset = ImageFolder("/home/javiserrano/deca-git/deca_testing/TestSamples/actual_eyes_2", transform=transform)
 
-    train_size = int(0.8 * len(dataset))
-    val_size = int(0.1 * len(dataset))
+    train_size = int(0.7 * len(dataset))
+    val_size = int(0.15 * len(dataset))
     test_size = len(dataset) - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
         dataset, [train_size, val_size, test_size]
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    batch_size = 2
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # Instantiate the network
     net = EyeCenterNet()
 
     # Define loss function and optimizer
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(net.parameters(), lr=0.0001)
+    optimizer = optim.Adam(net.parameters(), lr=0.000001)
 
     max_loss = float('inf')
     best_val_loss = float('inf')
     best_model_weights = None
 
     centers = eye_dataset.load_pupil_centers()
+    train_centers = centers[:train_size]
+    val_centers = centers[train_size:train_size + val_size]
+    test_centers = centers[train_size + val_size:]
+
+    # Tensorboard Initialization
+    from torch.utils.tensorboard import SummaryWriter
+    writer = SummaryWriter(f'tensorboard/tensorboard_test')
 
     # Training loop
     num_epochs = 250
+    counter = 0
+    patience = 10
+    early_stopping = False
+
     for epoch in range(num_epochs):
+        if early_stopping:
+            print("Early stopping at " + str(epoch) + " epoch.")
+            break
+
+        """
         if epoch == 125:
             optimizer = optim.Adam(net.parameters(), lr=0.00005)
         if epoch == 185:
             optimizer = optim.Adam(net.parameters(), lr=0.00001)
         if epoch == 220:
             optimizer = optim.Adam(net.parameters(), lr=0.000005)
+        """
 
         running_loss = 0.0
         net.train()  # Set the model to train mode
 
-        for images, labels in zip(train_loader, centers[:train_size]):
+        for images, labels in zip(train_loader, train_centers):
             optimizer.zero_grad()
 
             # Convert data in correct format
@@ -187,13 +206,15 @@ def train_model_version_2():
         # Print the average loss for the epoch
         train_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch + 1}/{num_epochs}, Training Loss: {train_loss}")
+        # Tensorboard writing
+        writer.add_scalar('Training loss', loss, global_step=epoch)
 
         # Validate the model
         net.eval()  # Set the model to evaluation mode
         val_loss = 0.0
 
         with torch.no_grad():
-            for images, labels in zip(val_loader, centers[train_size:val_size+train_size]):
+            for images, labels in zip(val_loader, val_centers):
                 image = images[0]
                 labels = torch.tensor(labels, requires_grad=False, dtype=torch.float32).unsqueeze(dim=0)
                 outputs = net(image)
@@ -202,12 +223,19 @@ def train_model_version_2():
 
         val_loss /= len(val_loader)
         print(f"Epoch {epoch + 1}/{num_epochs}, Validation Loss: {val_loss}")
+        # Tensorboard writing
+        writer.add_scalar('Evaluation loss', loss, global_step=epoch)
 
         # Check if the current model performs better
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_model_weights = net.state_dict().copy()
             print("-> Checkpoint created")
+            counter = 0
+        else:
+            counter += 1
+            if counter >= patience:
+                early_stopping = True
 
         # Early stopping
         if val_loss > max_loss:
@@ -221,7 +249,7 @@ def train_model_version_2():
     test_loss = 0.0
 
     with torch.no_grad():
-        for images, labels in zip(val_loader, centers[val_size+train_size:]):
+        for images, labels in zip(val_loader, test_centers):
             image = images[0]
             labels = torch.tensor(labels, requires_grad=False, dtype=torch.float32).unsqueeze(dim=0)
             outputs = net(image)
@@ -229,6 +257,8 @@ def train_model_version_2():
             test_loss += loss.item()
 
     test_loss /= len(test_loader)
+    # Tensorboard writing
+    writer.add_scalar('Testing loss', loss, global_step=epoch)
     print(f"Test Loss: {test_loss}")
 
     # Save the best model
@@ -244,11 +274,11 @@ if __name__ == "__main__":
 
     # Train model
     #train_model_version_1(path_to_folder)
-    #train_model_version_2()
+    train_model_version_2()
+
 
     # Test and load weights
-
-
+    """
     load_net = EyeCenterNet()
     load_net.load_state_dict(torch.load('eye_net_weights_version_2.pt'))
     # Images 65 through 82 have not been included during training for version_1
@@ -270,3 +300,4 @@ if __name__ == "__main__":
     try_sample(path_to_folder,'80.jpg', load_net)
     try_sample(path_to_folder,'81.jpg', load_net)
     try_sample(path_to_folder,'82.jpg', load_net)
+    """
