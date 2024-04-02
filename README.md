@@ -1,6 +1,4 @@
-# smplx-deca
-
-<h1 align="center">HUMAN AVATAR CREATION THROUGH DEEP LEARNING MODELS (SMPLX-DECA)</h1>
+<h2 align="center">HUMAN AVATAR CREATION THROUGH DEEP LEARNING MODELS (SMPLX-DECA)</h2>
 
 <h2>What is this work about?</h2>
 <p align="justify">The present work is the thesis of my undergraduate studies, which focuses on the creation of 3D human avatars using deep learning parametric models based on real human data (SMPL-X and DECA), with the aim of achieving realistic avatars from easily accessible input data such as images taken with a cell phone. For this purpose, the two models are merged and their functionalities are extended. In addition, special emphasis is placed on the texturing process of the head, even correcting the possible inaccuracies of alignment in the textures present in some avatars due to the low resolution of the input images. As a result, through several images (depending on the mode) and customization of the body in the friendly UI integrated, the user is able to generate multiple human avatars ready to be integrated into a video game engine.</p>
