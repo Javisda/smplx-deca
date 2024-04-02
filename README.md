@@ -14,9 +14,10 @@
   <li>Runtime optimization. Average body creation time in author's computer is 1 minute and 30 seconds.</li>
 </ul>
 
-<h2>Pipeline</h2>
+<h2>Pipeline and UI</h2>
 <p align="center">
   <img src="TFG/imagenes/pipeline.png">
+  <img src="TFG/imagenes/Sin título-83.png">
 </p>
 
 
