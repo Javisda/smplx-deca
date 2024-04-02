@@ -26,9 +26,9 @@
 <ul>
   <li>[1] Identity input image.</li>
   <li>[2] Expression input image.</li>
-  <li>[3] Close-up of inexpressive face final result.</li>
-  <li>[4] Close-up of expressive face final result.</li>
-  <li>[5] Close-up of the back of the head final result.</li>
+  <li>[3] Close-up of inexpressive face.</li>
+  <li>[4] Close-up of expressive face.</li>
+  <li>[5] Close-up of the back of the head.</li>
   <li>[6] Body generated with user-defined parameters, using the UI.</li>
   <li>[7] Body generated with automatic body generation based on head shape.</li>
 </ul>
